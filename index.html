@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>太初 Chaos Monitor - 全市场统计</title>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .mono { font-family: 'SF Mono', Monaco, 'Courier New', monospace; }
+  .tbl-row:hover { background: rgba(139, 92, 246, 0.08); }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { 100% { transform: rotate(360deg); } }
+  #debugLog { white-space: pre-wrap; }
+  .progress-bar {
+    background: linear-gradient(90deg, #8b5cf6, #a855f7);
+    transition: width 0.2s;
+  }
+  .hist-bar {
+    background: linear-gradient(90deg, rgba(139,92,246,0.8), rgba(168,85,247,0.4));
+    transition: width 0.3s;
+  }
+</style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+
+<div class="max-w-[1600px] mx-auto p-6">
+
+<!-- 标题 -->
+<div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">🔥 太初 Chaos Monitor</h1>
+    <p class="text-sm text-slate-400 mt-1">
+      链上实时数据 · <a class="text-purple-400 hover:underline mono" href="https://bscscan.com/address/0xA2B33aeAbc1870A855a1Cdd51db4e37f642c8487" target="_blank">0xA2B3…C8487</a>
+    </p>
+  </div>
+  <div class="flex items-center gap-3">
+    <span id="syncDot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+    <span id="syncText" class="text-sm text-slate-400">未开始</span>
+    <button id="refreshBtn" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm font-medium disabled:opacity-50">
+      ↻ 刷新
+    </button>
+    <button id="cancelBtn" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm font-medium hidden">
+      ✕ 取消
+    </button>
+  </div>
+</div>
+
+<!-- 进度条 -->
+<div id="progress" class="bg-slate-800 rounded-full h-2 overflow-hidden mb-4 hidden">
+  <div id="progressBar" class="progress-bar h-full rounded-full" style="width: 0%"></div>
+</div>
+
+<!-- 配置 -->
+<div class="bg-slate-800/60 rounded-xl p-4 mb-4 flex flex-wrap gap-3 items-end">
+  <div class="flex-1 min-w-[320px]">
+    <label class="text-xs text-slate-400 block mb-1">BSC RPC 节点</label>
+    <input id="rpcInput" type="text" class="bg-slate-700 rounded px-3 py-1.5 text-sm w-full mono" value="">
+  </div>
+  <div>
+    <label class="text-xs text-slate-400 block mb-1">快速切换</label>
+    <select id="rpcPreset" class="bg-slate-700 rounded px-3 py-1.5 text-sm">
+      <option value="">---</option>
+      <option value="https://bsc-dataseed.binance.org">Binance 官方</option>
+      <option value="https://bsc-dataseed1.defibit.io">DefiBit</option>
+      <option value="https://bsc-dataseed1.ninicoin.io">NiniCoin</option>
+      <option value="https://rpc.ankr.com/bsc">Ankr 公共</option>
+      <option value="https://binance.llamarpc.com">Llama</option>
+      <option value="https://bsc.drpc.org">dRPC</option>
+    </select>
+  </div>
+  <div>
+    <label class="text-xs text-slate-400 block mb-1">扫描范围</label>
+    <select id="scanMode" class="bg-slate-700 rounded px-3 py-1.5 text-sm">
+      <option value="all" selected>全部(较慢)</option>
+      <option value="1000">最近 1000</option>
+      <option value="500">最近 500</option>
+      <option value="200">最近 200</option>
+    </select>
+  </div>
+  <button id="saveRpcBtn" class="px-4 py-1.5 bg-slate-600 hover:bg-slate-500 rounded text-sm">
+    保存并扫描
+  </button>
+</div>
+
+<!-- 调试日志 -->
+<details class="mb-4 bg-slate-800/40 rounded-xl p-3">
+  <summary class="cursor-pointer text-sm text-slate-400 font-medium">🔍 调试日志(展开查看加载进度)</summary>
+  <pre id="debugLog" class="bg-black/60 text-xs p-3 mt-2 rounded max-h-48 overflow-y-auto text-slate-300 mono"></pre>
+</details>
+
+<!-- =========== 全市场统计面板 =========== -->
+<div id="dashboard" class="hidden">
+
+  <!-- 顶级数字 -->
+  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
+    <div class="bg-slate-800/60 rounded-xl p-3">
+      <div class="text-xs text-slate-400">当前价</div>
+      <div id="statCurPrice" class="text-lg font-bold text-purple-400 mono mt-1">--</div>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-3">
+      <div class="text-xs text-slate-400">合约总数(链上)</div>
+      <div id="statTotal" class="text-lg font-bold mt-1">--</div>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-3">
+      <div class="text-xs text-slate-400">已扫描</div>
+      <div id="statLoaded" class="text-lg font-bold mt-1">--</div>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-3">
+      <div class="text-xs text-slate-400">活跃合约</div>
+      <div id="statActive" class="text-lg font-bold text-purple-400 mt-1">--</div>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-3">
+      <div class="text-xs text-slate-400">独立 Maker</div>
+      <div id="statMakers" class="text-lg font-bold text-yellow-400 mt-1">--</div>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-3">
+      <div class="text-xs text-slate-400">独立 Taker</div>
+      <div id="statTakers" class="text-lg font-bold text-green-400 mt-1">--</div>
+    </div>
+  </div>
+
+  <!-- 资金分布 + 盈亏 -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+
+    <!-- 资金分布 -->
+    <div class="bg-slate-800/60 rounded-xl p-5">
+      <h3 class="text-sm font-semibold text-slate-300 mb-3">💰 活跃合约资金分布</h3>
+      <div class="space-y-3">
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-xs text-slate-400">未成交(等人接)</div>
+            <div id="statUnfilledCnt" class="text-lg font-bold text-yellow-400">-- 单</div>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-400">金额</div>
+            <div id="statUnfilledAmt" class="text-lg font-bold mono">--</div>
+          </div>
+        </div>
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-xs text-slate-400">锁定中(CD 进行)</div>
+            <div id="statLockedCnt" class="text-lg font-bold text-blue-400">-- 单</div>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-400">金额</div>
+            <div id="statLockedAmt" class="text-lg font-bold mono">--</div>
+          </div>
+        </div>
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-xs text-slate-400">CD 已到(可平仓)</div>
+            <div id="statReadyCnt" class="text-lg font-bold text-green-400">-- 单</div>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-400">金额</div>
+            <div id="statReadyAmt" class="text-lg font-bold mono">--</div>
+          </div>
+        </div>
+        <div class="border-t border-slate-700 pt-3 flex justify-between items-center">
+          <div class="text-sm text-slate-300 font-semibold">活跃合约总额</div>
+          <div id="statTotalActiveAmt" class="text-xl font-bold text-purple-400 mono">--</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 盈亏汇总 -->
+    <div class="bg-slate-800/60 rounded-xl p-5">
+      <h3 class="text-sm font-semibold text-slate-300 mb-3">
+        📊 盈亏统计(已接单活跃合约,按当前价)
+      </h3>
+      <div class="space-y-3">
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-xs text-slate-400">赚钱中的仓位</div>
+            <div id="statWinCnt" class="text-lg font-bold text-green-400">-- 单</div>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-400">总盈利</div>
+            <div id="statWinAmt" class="text-lg font-bold text-green-400 mono">--</div>
+          </div>
+        </div>
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-xs text-slate-400">亏钱中的仓位</div>
+            <div id="statLossCnt" class="text-lg font-bold text-red-400">-- 单</div>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-400">总亏损</div>
+            <div id="statLossAmt" class="text-lg font-bold text-red-400 mono">--</div>
+          </div>
+        </div>
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="text-xs text-slate-400">胜率 (盈利数/已接活跃)</div>
+            <div id="statWinRate" class="text-lg font-bold mono">--</div>
+          </div>
+          <div class="text-right">
+            <div class="text-xs text-slate-400">平均盈亏%</div>
+            <div id="statAvgPnl" class="text-lg font-bold mono">--</div>
+          </div>
+        </div>
+        <div class="border-t border-slate-700 pt-3 flex justify-between items-center">
+          <div class="text-sm text-slate-300 font-semibold">净盈亏</div>
+          <div id="statNetPnl" class="text-xl font-bold mono">--</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 锁定价直方图 -->
+  <div class="bg-slate-800/60 rounded-xl p-5 mb-4">
+    <h3 class="text-sm font-semibold text-slate-300 mb-3">📈 锁定价分布(已接单活跃合约)</h3>
+    <div id="priceHistogram" class="space-y-1.5 text-xs mono">
+      <div class="text-slate-500">加载后显示...</div>
+    </div>
+  </div>
+
+  <!-- Maker/Taker Top 榜 -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+    <div class="bg-slate-800/60 rounded-xl p-5">
+      <h3 class="text-sm font-semibold text-slate-300 mb-3">🏆 Top 10 Maker(按活跃金额)</h3>
+      <div id="topMakers" class="space-y-2 text-sm"></div>
+    </div>
+    <div class="bg-slate-800/60 rounded-xl p-5">
+      <h3 class="text-sm font-semibold text-slate-300 mb-3">🎯 Top 10 Taker(按活跃金额)</h3>
+      <div id="topTakers" class="space-y-2 text-sm"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- =========== 详情表 =========== -->
+<div id="detailsSection" class="hidden">
+
+  <!-- 过滤 -->
+  <div class="bg-slate-800/60 rounded-xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+    <div>
+      <label class="text-xs text-slate-400 block mb-1">状态</label>
+      <select id="fltStatus" class="bg-slate-700 rounded px-3 py-1.5 text-sm">
+        <option value="active" selected>活跃</option>
+        <option value="all">全部</option>
+        <option value="unfilled">未成交</option>
+        <option value="locked">锁定中</option>
+        <option value="ready">可平仓</option>
+        <option value="closed">已关闭</option>
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400 block mb-1">排序</label>
+      <select id="fltSort" class="bg-slate-700 rounded px-3 py-1.5 text-sm">
+        <option value="id_desc">最新优先</option>
+        <option value="id_asc">最早优先</option>
+        <option value="cd_asc">CD 最快到</option>
+        <option value="pnl_desc">盈亏 ↓</option>
+        <option value="pnl_asc">盈亏 ↑</option>
+        <option value="amount_desc">金额 ↓</option>
+      </select>
+    </div>
+    <div class="flex-1 min-w-[200px]">
+      <label class="text-xs text-slate-400 block mb-1">搜索地址</label>
+      <input id="fltAddr" type="text" placeholder="0x..." class="bg-slate-700 rounded px-3 py-1.5 text-sm w-full mono">
+    </div>
+    <div>
+      <label class="text-xs text-slate-400 block mb-1">显示条数</label>
+      <select id="fltPageSize" class="bg-slate-700 rounded px-3 py-1.5 text-sm">
+        <option value="50">50</option>
+        <option value="100" selected>100</option>
+        <option value="500">500</option>
+        <option value="99999">全部</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="bg-slate-800/60 rounded-xl p-4 mb-4">
+    <label class="text-xs text-slate-400 block mb-1">🎯 高亮我的地址(多个用逗号分隔)</label>
+    <input id="myAddrs" type="text" placeholder="0xaaa,0xbbb" class="bg-slate-700 rounded px-3 py-1.5 text-sm w-full mono">
+  </div>
+
+  <!-- 表格 -->
+  <div class="bg-slate-800/60 rounded-xl overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-900/60 text-xs text-slate-400 uppercase">
+          <tr>
+            <th class="px-3 py-3 text-left">ID</th>
+            <th class="px-3 py-3 text-left">状态</th>
+            <th class="px-3 py-3 text-left">Creator</th>
+            <th class="px-3 py-3 text-left">Taker</th>
+            <th class="px-3 py-3 text-right">合同金额</th>
+            <th class="px-3 py-3 text-right">Token</th>
+            <th class="px-3 py-3 text-right">锁定价</th>
+            <th class="px-3 py-3 text-right">价差 %</th>
+            <th class="px-3 py-3 text-right">盈亏 $</th>
+            <th class="px-3 py-3 text-left">CD</th>
+          </tr>
+        </thead>
+        <tbody id="tblBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+</div>
+
+<script>
+// ============================================================================
+const PROXY      = "0xA2B33aeAbc1870A855a1Cdd51db4e37f642c8487";
+const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
+const ZERO       = "0x0000000000000000000000000000000000000000";
+
+const CHAOS_ABI = [
+  `function getContract(uint256 num) view returns (
+     address, address, uint256, uint256,
+     uint256, uint256, uint256,
+     uint256, uint256,
+     bool, bool, uint256
+   )`,
+  "function nextContractId() view returns (uint256)",
+  "function token() view returns (address)",
+  "function pair() view returns (address)",
+];
+const PAIR_ABI = [
+  "function getReserves() view returns (uint112, uint112, uint32)",
+  "function token0() view returns (address)",
+];
+const MULTICALL_ABI = [
+  "function aggregate3(tuple(address target, bool allowFailure, bytes callData)[]) payable returns (tuple(bool success, bytes returnData)[])",
+];
+
+function dlog(...args) {
+  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  const time = new Date().toLocaleTimeString('zh-CN');
+  console.log(`[${time}]`, ...args);
+  const el = document.getElementById('debugLog');
+  if (el) {
+    el.textContent = `[${time}] ${msg}\n` + el.textContent;
+    const lines = el.textContent.split('\n');
+    if (lines.length > 200) el.textContent = lines.slice(0, 200).join('\n');
+  }
+}
+
+function setSync(dotCls, text) {
+  document.getElementById('syncDot').className = "w-2 h-2 rounded-full " + dotCls;
+  document.getElementById('syncText').textContent = text;
+}
+function setProgress(percent, visible = true) {
+  const bar = document.getElementById('progressBar');
+  const wrap = document.getElementById('progress');
+  wrap.classList.toggle('hidden', !visible);
+  bar.style.width = Math.max(0, Math.min(100, percent)) + '%';
+}
+
+const fmt = (v, d=2) => {
+  if (v === null || v === undefined) return "0.00";
+  return Number(ethers.formatUnits(v, 18)).toFixed(d);
+};
+const fmtUsd = (n) => {
+  if (!isFinite(n)) return "$0.00";
+  if (Math.abs(n) >= 1e6) return "$" + (n/1e6).toFixed(2) + "M";
+  if (Math.abs(n) >= 1e3) return "$" + (n/1e3).toFixed(2) + "K";
+  return "$" + n.toFixed(2);
+};
+const shortAddr = (a) => a ? `${a.slice(0,6)}…${a.slice(-4)}` : "";
+
+let provider, chaos, multicall, chaosIface;
+let _pairCache = null;
+let cancelFlag = false;
+
+let state = {
+  allContracts: [],
+  currentPrice: 0n,
+  nextId: 0n,
+};
+
+function initProvider(rpcUrl) {
+  dlog(`初始化 provider: ${rpcUrl}`);
+  try {
+    provider = new ethers.JsonRpcProvider(rpcUrl, { name: "bnb", chainId: 56 }, { staticNetwork: true });
+    chaos = new ethers.Contract(PROXY, CHAOS_ABI, provider);
+    multicall = new ethers.Contract(MULTICALL3, MULTICALL_ABI, provider);
+    chaosIface = new ethers.Interface(CHAOS_ABI);
+    _pairCache = null;
+    dlog("provider 初始化完成");
+    return true;
+  } catch (e) {
+    dlog(`provider 初始化失败: ${e.message}`);
+    return false;
+  }
+}
+
+async function getCurrentPrice() {
+  if (!_pairCache) {
+    const [pairAddr, tokenAddr] = await Promise.all([chaos.pair(), chaos.token()]);
+    dlog(`pair=${pairAddr} token=${tokenAddr}`);
+    const pair = new ethers.Contract(pairAddr, PAIR_ABI, provider);
+    const token0 = await pair.token0();
+    _pairCache = { pair, tokenIsToken0: token0.toLowerCase() === tokenAddr.toLowerCase() };
+  }
+  const r = await _pairCache.pair.getReserves();
+  const [tokenR, usdtR] = _pairCache.tokenIsToken0 ? [r[0], r[1]] : [r[1], r[0]];
+  return (usdtR * 10n ** 18n) / tokenR;
+}
+
+async function scanAllContracts(nextId, maxCount) {
+  const total = Number(nextId - 1n);
+  const toScan = Math.min(total, maxCount);
+  const startId = nextId - 1n;
+  const endId = startId - BigInt(toScan) + 1n;
+
+  dlog(`扫描 #${endId} 到 #${startId} (共 ${toScan} 个)`);
+  setProgress(0, true);
+
+  const batchSize = 50;
+  const results = [];
+  let successfulBatches = 0, failedBatches = 0;
+
+  for (let offset = 0; offset < toScan; offset += batchSize) {
+    if (cancelFlag) { dlog("⛔ 已取消"); break; }
+
+    const thisBatch = Math.min(batchSize, toScan - offset);
+    const calls = [];
+    const idsInBatch = [];
+    for (let i = 0; i < thisBatch; i++) {
+      const id = startId - BigInt(offset + i);
+      if (id <= 0n) break;
+      idsInBatch.push(id);
+      calls.push({
+        target: PROXY,
+        allowFailure: true,
+        callData: chaosIface.encodeFunctionData("getContract", [id]),
+      });
+    }
+    if (calls.length === 0) break;
+
+    const pct = Math.round((offset / toScan) * 100);
+    setProgress(pct);
+    setSync("bg-yellow-500 spin", `扫描中 ${offset}/${toScan} (${pct}%)`);
+
+    try {
+      const res = await multicall.aggregate3.staticCall(calls);
+      successfulBatches++;
+      let okCount = 0;
+      for (let i = 0; i < res.length; i++) {
+        if (!res[i].success) continue;
+        try {
+          const d = chaosIface.decodeFunctionResult("getContract", res[i].returnData);
+          results.push({
+            id:          idsInBatch[i],
+            creator:     d[0],
+            taker:       d[1],
+            usdt:        d[2],
+            tokenAmount: d[4],
+            lockPrice:   d[6],
+            createTime:  Number(d[7]),
+            cooldownEnd: Number(d[8]),
+            isActive:    d[9],
+          });
+          okCount++;
+        } catch (e) {}
+      }
+      if (successfulBatches <= 3 || successfulBatches % 10 === 0) {
+        dlog(`  批次 ${successfulBatches}: +${okCount} 条 (累计 ${results.length})`);
+      }
+    } catch (e) {
+      failedBatches++;
+      dlog(`批次失败 (${failedBatches}/3): ${e.message.slice(0, 80)}`);
+      if (failedBatches >= 3) {
+        dlog("❌ 连续失败,停止扫描。建议换 RPC");
+        break;
+      }
+      // 稍等再试
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+
+  setProgress(100, false);
+  dlog(`扫描完成: 共获取 ${results.length} 条合约数据`);
+  return results;
+}
+
+async function refresh() {
+  cancelFlag = false;
+  document.getElementById('refreshBtn').disabled = true;
+  document.getElementById('cancelBtn').classList.remove('hidden');
+  setSync("bg-yellow-500 spin", "同步中…");
+  dlog("━━━ 开始同步 ━━━");
+
+  try {
+    // 读 nextContractId
+    let nextId;
+    try {
+      nextId = await chaos.nextContractId();
+      dlog(`nextContractId = ${nextId}`);
+    } catch (e) {
+      dlog(`❌ RPC 不通: ${e.message}`);
+      setSync("bg-red-500", `RPC 不通: ${e.message.slice(0, 60)}`);
+      return;
+    }
+
+    let price = 0n;
+    try {
+      price = await getCurrentPrice();
+      dlog(`当前价 = $${ethers.formatUnits(price, 18)}`);
+    } catch (e) {
+      dlog(`⚠️ 读价失败: ${e.message}`);
+    }
+
+    state.nextId = nextId;
+    state.currentPrice = price;
+
+    // 扫描范围
+    const scanMode = document.getElementById('scanMode').value;
+    const maxCount = scanMode === 'all' ? Number(nextId - 1n) : parseInt(scanMode);
+
+    const contracts = await scanAllContracts(nextId, maxCount);
+    state.allContracts = contracts;
+
+    dashboard();
+    render();
+    setSync("bg-green-500", `同步完成 ${new Date().toLocaleTimeString('zh-CN')}`);
+    document.getElementById('dashboard').classList.remove('hidden');
+    document.getElementById('detailsSection').classList.remove('hidden');
+  } catch (e) {
+    console.error(e);
+    dlog(`❌ 错误: ${e.message}`);
+    setSync("bg-red-500", `失败: ${e.message.slice(0, 60)}`);
+  } finally {
+    document.getElementById('refreshBtn').disabled = false;
+    document.getElementById('cancelBtn').classList.add('hidden');
+    setProgress(0, false);
+  }
+}
+
+// ============================================================================
+// 统计面板
+// ============================================================================
+function dashboard() {
+  const now = Math.floor(Date.now() / 1000);
+  const contracts = state.allContracts;
+  const price = state.currentPrice;
+
+  // 顶级
+  document.getElementById('statCurPrice').textContent = price > 0n ? "$" + fmt(price, 6) : "--";
+  document.getElementById('statTotal').textContent = state.nextId.toString();
+  document.getElementById('statLoaded').textContent = contracts.length;
+
+  // 分类
+  const active   = contracts.filter(c => c.isActive);
+  const unfilled = active.filter(c => c.taker.toLowerCase() === ZERO);
+  const filled   = active.filter(c => c.taker.toLowerCase() !== ZERO);
+  const locked   = filled.filter(c => c.cooldownEnd > now);
+  const ready    = filled.filter(c => c.cooldownEnd <= now);
+
+  document.getElementById('statActive').textContent = active.length;
+
+  // 资金 (sum of c.usdt in USD)
+  const sumUsd = (arr) => arr.reduce((a, c) =>
+    a + Number(ethers.formatUnits(c.usdt, 18)), 0);
+
+  const unfilledAmt = sumUsd(unfilled);
+  const lockedAmt   = sumUsd(locked);
+  const readyAmt    = sumUsd(ready);
+  const totalActive = unfilledAmt + lockedAmt + readyAmt;
+
+  document.getElementById('statUnfilledCnt').textContent = unfilled.length + ' 单';
+  document.getElementById('statUnfilledAmt').textContent = fmtUsd(unfilledAmt);
+  document.getElementById('statLockedCnt').textContent = locked.length + ' 单';
+  document.getElementById('statLockedAmt').textContent = fmtUsd(lockedAmt);
+  document.getElementById('statReadyCnt').textContent = ready.length + ' 单';
+  document.getElementById('statReadyAmt').textContent = fmtUsd(readyAmt);
+  document.getElementById('statTotalActiveAmt').textContent = fmtUsd(totalActive);
+
+  // 盈亏 (已接单活跃)
+  let winCnt = 0, lossCnt = 0, winAmt = 0, lossAmt = 0, totalPnlPct = 0;
+  const pnlList = [];
+
+  filled.forEach(c => {
+    if (c.lockPrice === 0n || price === 0n) return;
+    const bps = Number((price - c.lockPrice) * 10000n / c.lockPrice);
+    const usdt = Number(ethers.formatUnits(c.usdt, 18));
+    const pnl = usdt * 2 * bps / 10000;
+    pnlList.push({ contract: c, bps, pnl });
+    totalPnlPct += bps;
+    if (pnl > 0) { winCnt++; winAmt += pnl; }
+    else if (pnl < 0) { lossCnt++; lossAmt += pnl; }
+  });
+
+  const netPnl = winAmt + lossAmt;
+  const winRate = filled.length > 0 ? (winCnt / filled.length * 100) : 0;
+  const avgPnlBps = pnlList.length > 0 ? totalPnlPct / pnlList.length : 0;
+
+  document.getElementById('statWinCnt').textContent = winCnt + ' 单';
+  document.getElementById('statWinAmt').textContent = '+' + fmtUsd(winAmt);
+  document.getElementById('statLossCnt').textContent = lossCnt + ' 单';
+  document.getElementById('statLossAmt').textContent = fmtUsd(lossAmt);
+  document.getElementById('statWinRate').textContent = winRate.toFixed(1) + '%';
+  document.getElementById('statAvgPnl').textContent = (avgPnlBps >= 0 ? '+' : '') + (avgPnlBps/100).toFixed(2) + '%';
+
+  const netEl = document.getElementById('statNetPnl');
+  netEl.textContent = (netPnl >= 0 ? '+' : '') + fmtUsd(netPnl);
+  netEl.className = 'text-xl font-bold mono ' + (netPnl >= 0 ? 'text-green-400' : 'text-red-400');
+
+  // 参与者
+  const makers = new Set(active.map(c => c.creator.toLowerCase()));
+  const takers = new Set(filled.map(c => c.taker.toLowerCase()));
+  document.getElementById('statMakers').textContent = makers.size;
+  document.getElementById('statTakers').textContent = takers.size;
+
+  // 锁定价直方图
+  renderHistogram(filled, price);
+
+  // Top 榜
+  renderTopUsers(active, filled);
+}
+
+function renderHistogram(filled, currentPrice) {
+  const el = document.getElementById('priceHistogram');
+  if (filled.length === 0 || currentPrice === 0n) {
+    el.innerHTML = '<div class="text-slate-500">暂无已接单数据</div>';
+    return;
+  }
+  const prices = filled.map(c => Number(ethers.formatUnits(c.lockPrice, 18)));
+  const curP = Number(ethers.formatUnits(currentPrice, 18));
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  const bucketCount = 10;
+  const step = (max - min) / bucketCount || 1;
+
+  const buckets = Array(bucketCount).fill(null).map(() => ({ count: 0, sum: 0 }));
+  for (const p of prices) {
+    let idx = Math.floor((p - min) / step);
+    if (idx >= bucketCount) idx = bucketCount - 1;
+    buckets[idx].count++;
+  }
+
+  const maxCount = Math.max(...buckets.map(b => b.count));
+
+  el.innerHTML = buckets.map((b, i) => {
+    const lo = min + i * step;
+    const hi = i === bucketCount - 1 ? max : min + (i + 1) * step;
+    const pct = (b.count / filled.length * 100).toFixed(1);
+    const barPct = maxCount > 0 ? (b.count / maxCount * 100) : 0;
+    const containsCurrent = curP >= lo && curP <= hi;
+    const marker = containsCurrent ? ' <span class="text-green-400 ml-1">◀ 当前价</span>' : '';
+    return `
+      <div class="flex items-center gap-2">
+        <div class="w-40 text-slate-400 text-right">$${lo.toFixed(6)} ~ $${hi.toFixed(6)}</div>
+        <div class="flex-1 bg-slate-900/40 rounded h-5 relative overflow-hidden">
+          <div class="hist-bar h-full" style="width: ${barPct}%"></div>
+        </div>
+        <div class="w-28 text-right text-slate-300">${b.count} 单 (${pct}%)${marker}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderTopUsers(active, filled) {
+  // Maker aggregate: by creator
+  const makerMap = {};
+  for (const c of active) {
+    const addr = c.creator.toLowerCase();
+    if (!makerMap[addr]) makerMap[addr] = { addr: c.creator, count: 0, amount: 0 };
+    makerMap[addr].count++;
+    makerMap[addr].amount += Number(ethers.formatUnits(c.usdt, 18));
+  }
+  const topMakers = Object.values(makerMap).sort((a,b) => b.amount - a.amount).slice(0, 10);
+
+  const takerMap = {};
+  for (const c of filled) {
+    const addr = c.taker.toLowerCase();
+    if (!takerMap[addr]) takerMap[addr] = { addr: c.taker, count: 0, amount: 0 };
+    takerMap[addr].count++;
+    takerMap[addr].amount += Number(ethers.formatUnits(c.usdt, 18));
+  }
+  const topTakers = Object.values(takerMap).sort((a,b) => b.amount - a.amount).slice(0, 10);
+
+  const renderRow = (u, i) => `
+    <div class="flex justify-between items-center py-1.5 border-b border-slate-700/30 last:border-0">
+      <div class="flex items-center gap-2">
+        <span class="text-slate-500 text-xs w-6">${i + 1}.</span>
+        <a href="https://bscscan.com/address/${u.addr}" target="_blank" class="mono text-purple-400 hover:underline">${shortAddr(u.addr)}</a>
+      </div>
+      <div class="text-right text-xs">
+        <span class="font-semibold mono">${fmtUsd(u.amount)}</span>
+        <span class="text-slate-500 ml-2">${u.count} 单</span>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('topMakers').innerHTML = topMakers.length > 0
+    ? topMakers.map(renderRow).join('')
+    : '<div class="text-slate-500">暂无数据</div>';
+  document.getElementById('topTakers').innerHTML = topTakers.length > 0
+    ? topTakers.map(renderRow).join('')
+    : '<div class="text-slate-500">暂无数据</div>';
+}
+
+// ============================================================================
+// 详情表
+// ============================================================================
+function render() {
+  const now = Math.floor(Date.now() / 1000);
+  const status = document.getElementById('fltStatus').value;
+  const sort = document.getElementById('fltSort').value;
+  const addr = document.getElementById('fltAddr').value.trim().toLowerCase();
+  const pageSize = parseInt(document.getElementById('fltPageSize').value);
+  const myAddrs = (document.getElementById('myAddrs').value || '')
+    .split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+
+  let list = state.allContracts.slice();
+
+  list = list.filter(c => {
+    const isClosed = !c.isActive;
+    const isUnfilled = c.isActive && c.taker.toLowerCase() === ZERO;
+    const isLocked = c.isActive && c.taker.toLowerCase() !== ZERO && c.cooldownEnd > now;
+    const isReady = c.isActive && c.taker.toLowerCase() !== ZERO && c.cooldownEnd <= now;
+    switch (status) {
+      case "all": return true;
+      case "active": return c.isActive;
+      case "unfilled": return isUnfilled;
+      case "locked": return isLocked;
+      case "ready": return isReady;
+      case "closed": return isClosed;
+    }
+  });
+
+  if (addr) {
+    list = list.filter(c => c.creator.toLowerCase().includes(addr) || c.taker.toLowerCase().includes(addr));
+  }
+
+  list.forEach(c => {
+    if (c.taker.toLowerCase() !== ZERO && c.lockPrice > 0n && state.currentPrice > 0n) {
+      c._pnlBps = Number((state.currentPrice - c.lockPrice) * 10000n / c.lockPrice);
+    } else c._pnlBps = null;
+  });
+
+  list.sort((a, b) => {
+    switch (sort) {
+      case "id_desc": return Number(b.id - a.id);
+      case "id_asc": return Number(a.id - b.id);
+      case "cd_asc": return a.cooldownEnd - b.cooldownEnd;
+      case "pnl_desc": return (b._pnlBps ?? -1e9) - (a._pnlBps ?? -1e9);
+      case "pnl_asc": return (a._pnlBps ?? 1e9) - (b._pnlBps ?? 1e9);
+      case "amount_desc": return Number(b.usdt - a.usdt);
+    }
+  });
+
+  list = list.slice(0, pageSize);
+
+  const tbody = document.getElementById('tblBody');
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center p-10 text-slate-500">无匹配结果</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = list.map(c => {
+    const isUnfilled = c.taker.toLowerCase() === ZERO;
+    const isClosed = !c.isActive;
+    const remaining = c.cooldownEnd - now;
+
+    let statusBadge, cdStr;
+    if (isClosed) {
+      statusBadge = '<span class="px-2 py-0.5 rounded bg-slate-600/40 text-slate-400 text-xs">已关闭</span>';
+      cdStr = '—';
+    } else if (isUnfilled) {
+      statusBadge = '<span class="px-2 py-0.5 rounded bg-yellow-600/30 text-yellow-300 text-xs">未成交</span>';
+      cdStr = '—';
+    } else if (remaining > 0) {
+      statusBadge = '<span class="px-2 py-0.5 rounded bg-blue-600/30 text-blue-300 text-xs">锁定中</span>';
+      cdStr = `${Math.floor(remaining/3600)}h ${Math.floor((remaining%3600)/60)}m`;
+    } else {
+      statusBadge = '<span class="px-2 py-0.5 rounded bg-green-600/30 text-green-300 text-xs">可平仓</span>';
+      cdStr = '<span class="text-green-400">已到期</span>';
+    }
+
+    let priceDiffStr = '—', pnlStr = '—';
+    if (!isUnfilled && !isClosed && c._pnlBps !== null) {
+      const bps = c._pnlBps;
+      const color = bps >= 0 ? 'text-green-400' : 'text-red-400';
+      priceDiffStr = `<span class="${color}">${bps>=0?'+':''}${(bps/100).toFixed(2)}%</span>`;
+      const usdt = Number(ethers.formatUnits(c.usdt, 18));
+      const pnl = usdt * 2 * bps / 10000;
+      pnlStr = `<span class="${color}">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>`;
+    }
+
+    const creatorMine = myAddrs.includes(c.creator.toLowerCase());
+    const takerMine = myAddrs.includes(c.taker.toLowerCase());
+    const rowHl = (creatorMine || takerMine) ? 'bg-purple-900/20' : '';
+
+    return `
+      <tr class="tbl-row border-t border-slate-700/50 ${rowHl}">
+        <td class="px-3 py-2 mono">#${c.id}</td>
+        <td class="px-3 py-2">${statusBadge}</td>
+        <td class="px-3 py-2"><a href="https://bscscan.com/address/${c.creator}" target="_blank" class="mono hover:text-purple-400 ${creatorMine?'text-purple-400 font-bold':''}">${shortAddr(c.creator)}</a></td>
+        <td class="px-3 py-2">${isUnfilled ? '<span class="text-slate-500">—</span>' : `<a href="https://bscscan.com/address/${c.taker}" target="_blank" class="mono hover:text-purple-400 ${takerMine?'text-purple-400 font-bold':''}">${shortAddr(c.taker)}</a>`}</td>
+        <td class="px-3 py-2 text-right mono">$${fmt(c.usdt)}</td>
+        <td class="px-3 py-2 text-right mono text-slate-400">${isUnfilled?'—':fmt(c.tokenAmount)}</td>
+        <td class="px-3 py-2 text-right mono">${isUnfilled?'—':'$'+fmt(c.lockPrice,6)}</td>
+        <td class="px-3 py-2 text-right mono">${priceDiffStr}</td>
+        <td class="px-3 py-2 text-right mono">${pnlStr}</td>
+        <td class="px-3 py-2 text-sm">${cdStr}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ============================================================================
+// 事件
+// ============================================================================
+const DEFAULT_RPC = "https://bsc-dataseed.binance.org";
+document.getElementById('rpcInput').value = localStorage.getItem("bsc_rpc") || DEFAULT_RPC;
+
+document.getElementById('saveRpcBtn').addEventListener('click', () => {
+  const url = document.getElementById('rpcInput').value.trim() || DEFAULT_RPC;
+  localStorage.setItem("bsc_rpc", url);
+  initProvider(url);
+  refresh();
+});
+document.getElementById('rpcPreset').addEventListener('change', e => {
+  if (e.target.value) document.getElementById('rpcInput').value = e.target.value;
+});
+document.getElementById('refreshBtn').addEventListener('click', refresh);
+document.getElementById('cancelBtn').addEventListener('click', () => { cancelFlag = true; });
+
+['fltStatus','fltSort','fltAddr','myAddrs','fltPageSize'].forEach(id => {
+  document.getElementById(id).addEventListener('input', render);
+});
+
+document.getElementById('myAddrs').value = localStorage.getItem("my_addrs") || "";
+document.getElementById('myAddrs').addEventListener('change', e => {
+  localStorage.setItem("my_addrs", e.target.value);
+});
+
+// 启动
+dlog("页面加载完成,ethers 版本: " + (ethers.version || '?'));
+if (initProvider(document.getElementById('rpcInput').value)) {
+  refresh();
+}
+</script>
+</body>
+</html>
