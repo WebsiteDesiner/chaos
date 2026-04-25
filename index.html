@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>太初 Chaos Monitor - 全市场统计</title>
+<title>太初 Chaos Monitor - 公开版</title>
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
@@ -21,18 +21,25 @@
     background: linear-gradient(90deg, rgba(139,92,246,0.8), rgba(168,85,247,0.4));
     transition: width 0.3s;
   }
+  /* 按角色配色 */
+  .role-maker    { background-color: rgba(14, 165, 233, 0.12); }
+  .role-maker:hover    { background-color: rgba(14, 165, 233, 0.22); }
+  .role-taker    { background-color: rgba(245, 158, 11, 0.12); }
+  .role-taker:hover    { background-color: rgba(245, 158, 11, 0.22); }
+  .role-both     { background-color: rgba(168, 85, 247, 0.15); }
+  .role-both:hover     { background-color: rgba(168, 85, 247, 0.25); }
 </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen">
 
 <div class="max-w-[1600px] mx-auto p-6">
 
-<!-- 标题 -->
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <div>
-    <h1 class="text-2xl font-bold">🔥 太初 Chaos Monitor</h1>
+    <h1 class="text-2xl font-bold">🔥 太初 Chaos Monitor <span class="text-xs px-2 py-0.5 bg-purple-600/40 rounded text-purple-200 align-middle ml-1">公开版</span></h1>
     <p class="text-sm text-slate-400 mt-1">
       链上实时数据 · <a class="text-purple-400 hover:underline mono" href="https://bscscan.com/address/0xA2B33aeAbc1870A855a1Cdd51db4e37f642c8487" target="_blank">0xA2B3…C8487</a>
+      · <span class="text-yellow-400">在下方填入你的钱包地址,自动保存</span>
     </p>
   </div>
   <div class="flex items-center gap-3">
@@ -47,12 +54,10 @@
   </div>
 </div>
 
-<!-- 进度条 -->
 <div id="progress" class="bg-slate-800 rounded-full h-2 overflow-hidden mb-4 hidden">
   <div id="progressBar" class="progress-bar h-full rounded-full" style="width: 0%"></div>
 </div>
 
-<!-- 配置 -->
 <div class="bg-slate-800/60 rounded-xl p-4 mb-4 flex flex-wrap gap-3 items-end">
   <div class="flex-1 min-w-[320px]">
     <label class="text-xs text-slate-400 block mb-1">BSC RPC 节点</label>
@@ -84,16 +89,13 @@
   </button>
 </div>
 
-<!-- 调试日志 -->
 <details class="mb-4 bg-slate-800/40 rounded-xl p-3">
   <summary class="cursor-pointer text-sm text-slate-400 font-medium">🔍 调试日志(展开查看加载进度)</summary>
   <pre id="debugLog" class="bg-black/60 text-xs p-3 mt-2 rounded max-h-48 overflow-y-auto text-slate-300 mono"></pre>
 </details>
 
-<!-- =========== 全市场统计面板 =========== -->
 <div id="dashboard" class="hidden">
 
-  <!-- 顶级数字 -->
   <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
     <div class="bg-slate-800/60 rounded-xl p-3">
       <div class="text-xs text-slate-400">当前价</div>
@@ -121,10 +123,147 @@
     </div>
   </div>
 
-  <!-- 资金分布 + 盈亏 -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+  <!-- 💼 我的盈亏(USDT 利润 + 保证金扣费 分开统计) -->
+  <div class="bg-gradient-to-r from-sky-900/20 via-purple-900/20 to-amber-900/20 rounded-xl p-5 mb-4 border border-slate-700">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-3">
+      <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-3 flex-wrap">
+        💼 我的盈亏 <span class="text-xs text-slate-400 font-normal">(浮动 + 已实现)</span>
+        <button id="snapshotBtn" class="px-2 py-1 bg-purple-600 hover:bg-purple-700 rounded text-xs font-medium ml-2" title="保存当前状态快照">
+          📸 存快照
+        </button>
+        <button id="syncRealBtn" class="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs font-medium" title="扫合约 USDT 流水算出每个地址的真实已实现利润">
+          🔍 同步真实利润
+        </button>
+        <span id="syncProgress" class="hidden flex items-center gap-2 text-xs">
+          <span class="bg-slate-700 rounded-full h-1.5 w-32 overflow-hidden inline-block align-middle">
+            <span id="syncProgressBar" class="bg-green-500 h-full transition-all" style="width:0%"></span>
+          </span>
+          <span id="syncProgressText" class="text-slate-400 mono">0/0</span>
+          <span id="syncEventCount" class="text-amber-300 mono"></span>
+        </span>
+      </h3>
+      <div class="flex gap-5 items-end flex-wrap">
+        <div class="text-right">
+          <div class="text-xs text-slate-400">🔒 锁在合约里</div>
+          <div id="myHdrLocked" class="mono text-cyan-300 text-lg font-bold">--</div>
+        </div>
+        <div class="text-right">
+          <div class="text-xs text-slate-400">💰 未平仓 浮 USDT</div>
+          <div id="myNetUsdt" class="text-lg font-bold mono">--</div>
+        </div>
+        <div class="text-right">
+          <div class="text-xs text-slate-400">💸 浮预扣费 (Taker)</div>
+          <div id="myHdrFee" class="mono text-red-400 text-lg font-bold">--</div>
+        </div>
+        <div class="text-right">
+          <div class="text-xs text-slate-400">💵 已实现 USDT (链上真实)</div>
+          <div id="myRealizedUsdt" class="mono text-amber-300 text-lg font-bold" title="点击 🔍 同步真实利润">未同步</div>
+        </div>
+        <div class="text-right border-l-2 border-purple-500/40 pl-5">
+          <div class="text-xs text-slate-400">💎 浮+已实现 真实净</div>
+          <div id="myNetPnl" class="text-2xl font-bold mono">--</div>
+        </div>
+      </div>
+    </div>
 
-    <!-- 资金分布 -->
+    <!-- 提示 -->
+    <div class="bg-slate-900/40 border border-slate-700/50 rounded p-2 mb-3 text-xs text-slate-300 space-y-1">
+      <div>📐 <strong>浮动盈亏</strong> = 未平仓合约按当前价的浮盈 · USDT 利润 = G÷2 · Taker 扣 (P+G/2)×5%</div>
+      <div class="text-amber-300">💵 <strong>已实现 USDT</strong> = 扫合约 USDT 流水算出来的真实历史利润(IN−OUT),覆盖所有已平仓+取消的合约 · 点 🔍 按钮同步,数据缓存在浏览器</div>
+      <div class="text-slate-400">💡 真实净 = 浮动 + 已实现 ≈ 你账户最终的总盈亏</div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+
+      <!-- 🔵 做 Maker -->
+      <div class="bg-sky-900/30 rounded-lg p-3 border border-sky-700/30">
+        <div class="font-semibold text-sky-300 mb-2">🔵 我做 Maker(出资方)<span class="text-xs text-slate-500 font-normal block">USDT 利润 = G/2 · 不扣保证金</span></div>
+        <div class="space-y-1">
+          <div class="text-xs text-slate-500 uppercase tracking-wide mt-1">未平仓</div>
+          <div class="flex justify-between"><span class="text-slate-400">  USDT 浮盈</span><span id="myM_openWin"   class="mono text-green-400">--</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  USDT 浮亏</span><span id="myM_openLoss"  class="mono text-red-400">--</span></div>
+          <div class="flex justify-between border-t border-slate-700/40 pt-1"><span class="text-slate-400">  USDT 净</span><span id="myM_openNet"   class="mono font-bold">--</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  锁定保证金</span><span id="myM_openLock"  class="mono text-sky-300">--</span></div>
+
+          <div class="text-xs text-slate-500 uppercase tracking-wide mt-2">已关闭* <span class="text-slate-600 normal-case">(仅参考)</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  USDT 利润</span><span id="myM_closedWin" class="mono text-green-400">--</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  USDT 亏损</span><span id="myM_closedLoss" class="mono text-red-400">--</span></div>
+          <div class="flex justify-between border-t border-slate-700/40 pt-1"><span class="text-slate-400">  USDT 净</span><span id="myM_closedNet" class="mono font-bold">--</span></div>
+
+          <div class="flex justify-between border-t-2 border-sky-700/50 pt-2 mt-2"><span class="text-sky-200 font-semibold">未平仓 USDT 净</span><span id="myM_total"  class="mono font-bold">--</span></div>
+        </div>
+      </div>
+
+      <!-- 🟠 做 Taker -->
+      <div class="bg-amber-900/30 rounded-lg p-3 border border-amber-700/30">
+        <div class="font-semibold text-amber-300 mb-2">🟠 我做 Taker(接单方)<span class="text-xs text-slate-500 font-normal block">USDT 利润 = G/2 · 扣保证金 (P+G/2)×5%</span></div>
+        <div class="space-y-1">
+          <div class="text-xs text-slate-500 uppercase tracking-wide mt-1">未平仓</div>
+          <div class="flex justify-between"><span class="text-slate-400">  USDT 浮盈</span><span id="myT_openWin"   class="mono text-green-400">--</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  USDT 浮亏</span><span id="myT_openLoss"  class="mono text-red-400">--</span></div>
+          <div class="flex justify-between border-t border-slate-700/40 pt-1"><span class="text-slate-400">  USDT 净</span><span id="myT_openNet"   class="mono font-bold">--</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  锁定保证金</span><span id="myT_openLock"  class="mono text-amber-300">--</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  保证金待扣手续费</span><span id="myT_openFee"  class="mono text-red-400">--</span></div>
+
+          <div class="text-xs text-slate-500 uppercase tracking-wide mt-2">已关闭* <span class="text-slate-600 normal-case">(仅参考)</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  USDT 利润</span><span id="myT_closedWin" class="mono text-green-400">--</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  USDT 亏损</span><span id="myT_closedLoss" class="mono text-red-400">--</span></div>
+          <div class="flex justify-between border-t border-slate-700/40 pt-1"><span class="text-slate-400">  USDT 净</span><span id="myT_closedNet" class="mono font-bold">--</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">  保证金已扣手续费</span><span id="myT_closedFee" class="mono text-red-400">--</span></div>
+
+          <div class="flex justify-between border-t-2 border-amber-700/50 pt-2 mt-2"><span class="text-amber-200 font-semibold">未平仓 真实净</span><span id="myT_total"  class="mono font-bold">--</span></div>
+        </div>
+      </div>
+
+      <!-- 🟣 同时 M+T(罕见) -->
+      <div class="bg-purple-900/30 rounded-lg p-3 border border-purple-700/30">
+        <div class="font-semibold text-purple-300 mb-2">🟣 M+T 同一人 <span class="text-xs text-slate-500 font-normal block">USDT = G · 扣保证金 (P+G/2)×5%</span></div>
+        <div class="space-y-1">
+          <div class="flex justify-between"><span class="text-slate-400">未平仓 USDT 净</span><span id="myB_open"   class="mono font-bold">--</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">已关闭* USDT 净</span><span id="myB_closed" class="mono font-bold">--</span></div>
+          <div class="flex justify-between border-t-2 border-purple-700/50 pt-1 mt-1"><span class="text-purple-200 font-semibold">未平仓 真实净</span><span id="myB_total" class="mono font-bold">--</span></div>
+        </div>
+        <div class="text-slate-500 text-xs mt-3 pt-2 border-t border-slate-700/40">
+          * 已关闭是"假设持有至今"估值
+        </div>
+      </div>
+
+    </div>
+    <!-- 参与合约数 + 累计手续费 -->
+    <div class="mt-3 pt-3 border-t border-slate-700/50 flex flex-wrap gap-4 text-xs text-slate-400">
+      <span>参与合约: <span id="myContractCount" class="text-slate-200 font-semibold">--</span></span>
+      <span>我做 Maker: <span id="myMakerCount"    class="text-sky-300 font-semibold">--</span></span>
+      <span>我做 Taker: <span id="myTakerCount"    class="text-amber-300 font-semibold">--</span></span>
+      <span>M+T 都是我: <span id="myBothCount"    class="text-purple-300 font-semibold">--</span></span>
+      <span class="ml-auto">💸 累计手续费 (Taker): <span id="myTotalFees" class="text-red-400 font-semibold">--</span></span>
+    </div>
+
+    <!-- 💵 已实现明细(每个地址的真实利润 breakdown)-->
+    <details id="realizedPanel" class="mt-3 pt-3 border-t border-slate-700/50 hidden" open>
+      <summary class="cursor-pointer text-xs text-amber-300 font-semibold hover:text-amber-200">💵 已实现 USDT 明细 — 按地址 (<span id="realizedCount">0</span>)</summary>
+      <div class="mt-2 overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-900/50 text-slate-400">
+            <tr>
+              <th class="px-3 py-2 text-left">账户</th>
+              <th class="px-3 py-2 text-right">投入合约</th>
+              <th class="px-3 py-2 text-right">合约退还</th>
+              <th class="px-3 py-2 text-right">已实现 净 USDT</th>
+              <th class="px-3 py-2 text-right">交易笔数</th>
+            </tr>
+          </thead>
+          <tbody id="realizedTableBody"></tbody>
+        </table>
+      </div>
+    </details>
+
+    <!-- 📸 历史快照对比区 -->
+    <details id="snapshotPanel" class="mt-3 pt-3 border-t border-slate-700/50 hidden">
+      <summary class="cursor-pointer text-xs text-purple-300 font-semibold hover:text-purple-200">📸 历史快照对比 (<span id="snapshotCount">0</span>)</summary>
+      <div id="snapshotList" class="mt-2 space-y-2"></div>
+    </details>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
     <div class="bg-slate-800/60 rounded-xl p-5">
       <h3 class="text-sm font-semibold text-slate-300 mb-3">💰 活跃合约资金分布</h3>
       <div class="space-y-3">
@@ -165,7 +304,6 @@
       </div>
     </div>
 
-    <!-- 盈亏汇总 -->
     <div class="bg-slate-800/60 rounded-xl p-5">
       <h3 class="text-sm font-semibold text-slate-300 mb-3">
         📊 盈亏统计(已接单活跃合约,按当前价)
@@ -209,7 +347,6 @@
     </div>
   </div>
 
-  <!-- 锁定价直方图 -->
   <div class="bg-slate-800/60 rounded-xl p-5 mb-4">
     <h3 class="text-sm font-semibold text-slate-300 mb-3">📈 锁定价分布(已接单活跃合约)</h3>
     <div id="priceHistogram" class="space-y-1.5 text-xs mono">
@@ -217,7 +354,6 @@
     </div>
   </div>
 
-  <!-- Maker/Taker Top 榜 -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
     <div class="bg-slate-800/60 rounded-xl p-5">
       <h3 class="text-sm font-semibold text-slate-300 mb-3">🏆 Top 10 Maker(按活跃金额)</h3>
@@ -231,10 +367,8 @@
 
 </div>
 
-<!-- =========== 详情表 =========== -->
 <div id="detailsSection" class="hidden">
 
-  <!-- 过滤 -->
   <div class="bg-slate-800/60 rounded-xl p-4 mb-4 flex flex-wrap gap-3 items-center">
     <div>
       <label class="text-xs text-slate-400 block mb-1">状态</label>
@@ -245,6 +379,16 @@
         <option value="locked">锁定中</option>
         <option value="ready">可平仓</option>
         <option value="closed">已关闭</option>
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400 block mb-1">我的角色</label>
+      <select id="fltRole" class="bg-slate-700 rounded px-3 py-1.5 text-sm">
+        <option value="all" selected>全部</option>
+        <option value="mine">只看我参与的</option>
+        <option value="maker">只看我做 Maker</option>
+        <option value="taker">只看我做 Taker</option>
+        <option value="none">只看不是我的</option>
       </select>
     </div>
     <div>
@@ -266,33 +410,63 @@
       <label class="text-xs text-slate-400 block mb-1">显示条数</label>
       <select id="fltPageSize" class="bg-slate-700 rounded px-3 py-1.5 text-sm">
         <option value="50">50</option>
-        <option value="100" selected>100</option>
-        <option value="500">500</option>
+        <option value="100">100</option>
+        <option value="500" selected>500</option>
         <option value="99999">全部</option>
       </select>
     </div>
   </div>
 
   <div class="bg-slate-800/60 rounded-xl p-4 mb-4">
-    <label class="text-xs text-slate-400 block mb-1">🎯 高亮我的地址(多个用逗号分隔)</label>
-    <input id="myAddrs" type="text" placeholder="0xaaa,0xbbb" class="bg-slate-700 rounded px-3 py-1.5 text-sm w-full mono">
+    <label class="text-xs text-slate-400 block mb-1 flex items-center justify-between">
+      <span>🎯 高亮我的地址</span>
+      <span class="flex items-center gap-3">
+        <button id="resetAddrsBtn" type="button" class="text-xs text-red-400 hover:text-red-300 underline font-normal">
+          🗑 清空地址
+        </button>
+        <span id="myAddrCount" class="text-xs text-purple-400 font-normal"></span>
+      </span>
+    </label>
+    <textarea id="myAddrs" rows="4" placeholder="🎯 在这里粘贴你的钱包地址,一行一个,自动保存&#10;0xaaa...&#10;0xbbb..."
+           class="bg-slate-700 rounded px-3 py-2 text-sm w-full mono resize-y"></textarea>
+    <p class="text-xs text-slate-500 mt-1">💾 自动保存到浏览器,换浏览器/清缓存会丢</p>
   </div>
 
-  <!-- 表格 -->
   <div class="bg-slate-800/60 rounded-xl overflow-hidden">
+    <div class="px-4 py-2 text-xs text-slate-500 border-b border-slate-700/50 flex flex-wrap gap-4 items-center">
+      <span class="font-semibold text-slate-400">行背景色:</span>
+      <span class="inline-flex items-center gap-1.5">
+        <span class="inline-block w-3 h-3 rounded" style="background:rgba(14,165,233,0.5)"></span>
+        我做 Maker(别人亏损我安全)
+      </span>
+      <span class="inline-flex items-center gap-1.5">
+        <span class="inline-block w-3 h-3 rounded" style="background:rgba(245,158,11,0.5)"></span>
+        我做 Taker(我承担风险)
+      </span>
+      <span class="inline-flex items-center gap-1.5">
+        <span class="inline-block w-3 h-3 rounded" style="background:rgba(168,85,247,0.5)"></span>
+        M+T 都是我
+      </span>
+      <span class="ml-auto text-slate-400">
+        💡 已关闭盈亏带 <span class="text-slate-400">*</span> 表示"假设持有至今"估值
+      </span>
+    </div>
+    <div id="tblCounter" class="px-4 py-2 text-xs border-b border-slate-700/50 bg-slate-900/40 hidden"></div>
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-slate-900/60 text-xs text-slate-400 uppercase">
           <tr>
             <th class="px-3 py-3 text-left">ID</th>
             <th class="px-3 py-3 text-left">状态</th>
+            <th class="px-3 py-3 text-center">角色</th>
             <th class="px-3 py-3 text-left">Creator</th>
             <th class="px-3 py-3 text-left">Taker</th>
             <th class="px-3 py-3 text-right">合同金额</th>
             <th class="px-3 py-3 text-right">Token</th>
             <th class="px-3 py-3 text-right">锁定价</th>
             <th class="px-3 py-3 text-right">价差 %</th>
-            <th class="px-3 py-3 text-right">盈亏 $</th>
+            <th class="px-3 py-3 text-right">毛利 $</th>
+            <th class="px-3 py-3 text-right">我的净 $</th>
             <th class="px-3 py-3 text-left">CD</th>
           </tr>
         </thead>
@@ -309,6 +483,8 @@
 // ============================================================================
 const PROXY      = "0xA2B33aeAbc1870A855a1Cdd51db4e37f642c8487";
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
+const USDT       = "0x55d398326f99059fF775485246999027B3197955";
+const TRANSFER_SIG = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const ZERO       = "0x0000000000000000000000000000000000000000";
 
 const CHAOS_ABI = [
@@ -415,7 +591,7 @@ async function scanAllContracts(nextId, maxCount) {
 
   const batchSize = 50;
   const results = [];
-  let successfulBatches = 0, failedBatches = 0;
+  let successfulBatches = 0, totalFailures = 0, consecutiveFailures = 0;
 
   for (let offset = 0; offset < toScan; offset += batchSize) {
     if (cancelFlag) { dlog("⛔ 已取消"); break; }
@@ -437,11 +613,12 @@ async function scanAllContracts(nextId, maxCount) {
 
     const pct = Math.round((offset / toScan) * 100);
     setProgress(pct);
-    setSync("bg-yellow-500 spin", `扫描中 ${offset}/${toScan} (${pct}%)`);
+    setSync("bg-yellow-500 spin", `扫描中 ${offset}/${toScan} (${pct}%) · 已加载 ${results.length}`);
 
     try {
       const res = await multicall.aggregate3.staticCall(calls);
       successfulBatches++;
+      consecutiveFailures = 0;  // 成功就重置连续失败计数
       let okCount = 0;
       for (let i = 0; i < res.length; i++) {
         if (!res[i].success) continue;
@@ -465,19 +642,48 @@ async function scanAllContracts(nextId, maxCount) {
         dlog(`  批次 ${successfulBatches}: +${okCount} 条 (累计 ${results.length})`);
       }
     } catch (e) {
-      failedBatches++;
-      dlog(`批次失败 (${failedBatches}/3): ${e.message.slice(0, 80)}`);
-      if (failedBatches >= 3) {
-        dlog("❌ 连续失败,停止扫描。建议换 RPC");
+      totalFailures++;
+      consecutiveFailures++;
+      dlog(`⚠️ 批次失败 (连续 ${consecutiveFailures},累计 ${totalFailures}): ${e.message.slice(0, 100)}`);
+      // 连续 10 次失败才放弃(之前是累计 3 次,太激进)
+      if (consecutiveFailures >= 10) {
+        dlog(`❌ 连续 ${consecutiveFailures} 次失败,停止扫描。已加载 ${results.length} 条。建议换 RPC 后重试。`);
         break;
       }
-      // 稍等再试
-      await new Promise(r => setTimeout(r, 1000));
+      // 指数退避
+      const backoff = Math.min(5000, 500 * Math.pow(2, consecutiveFailures));
+      await new Promise(r => setTimeout(r, backoff));
+      // 失败的批次再重试一次
+      try {
+        const res = await multicall.aggregate3.staticCall(calls);
+        consecutiveFailures = 0;
+        successfulBatches++;
+        for (let i = 0; i < res.length; i++) {
+          if (!res[i].success) continue;
+          try {
+            const d = chaosIface.decodeFunctionResult("getContract", res[i].returnData);
+            results.push({
+              id: idsInBatch[i], creator: d[0], taker: d[1], usdt: d[2],
+              tokenAmount: d[4], lockPrice: d[6], createTime: Number(d[7]),
+              cooldownEnd: Number(d[8]), isActive: d[9],
+            });
+          } catch {}
+        }
+        dlog(`  ↻ 重试成功,累计 ${results.length} 条`);
+      } catch (e2) {
+        dlog(`  ↻ 重试仍失败,跳过这批`);
+      }
     }
   }
 
   setProgress(100, false);
-  dlog(`扫描完成: 共获取 ${results.length} 条合约数据`);
+  const expected = toScan;
+  const loaded = results.length;
+  const pct = expected > 0 ? (loaded / expected * 100).toFixed(1) : 0;
+  dlog(`扫描完成: 获取 ${loaded}/${expected} 条 (${pct}%),失败 ${totalFailures} 批次`);
+  if (loaded < expected * 0.95) {
+    dlog(`⚠️ 数据不完整!建议换 RPC 后点"刷新"重试。Ankr/dRPC 通常最稳。`);
+  }
   return results;
 }
 
@@ -489,7 +695,6 @@ async function refresh() {
   dlog("━━━ 开始同步 ━━━");
 
   try {
-    // 读 nextContractId
     let nextId;
     try {
       nextId = await chaos.nextContractId();
@@ -511,12 +716,14 @@ async function refresh() {
     state.nextId = nextId;
     state.currentPrice = price;
 
-    // 扫描范围
     const scanMode = document.getElementById('scanMode').value;
     const maxCount = scanMode === 'all' ? Number(nextId - 1n) : parseInt(scanMode);
 
     const contracts = await scanAllContracts(nextId, maxCount);
     state.allContracts = contracts;
+
+    // ★ 扫完立即算一次 _pnlBps,存到每条合约上,render 只读不算
+    computePnlForAll();
 
     dashboard();
     render();
@@ -535,6 +742,34 @@ async function refresh() {
 }
 
 // ============================================================================
+// ★ 一次性算好所有盈亏,带详细诊断
+// ============================================================================
+function computePnlForAll() {
+  let nonNull = 0, noTaker = 0, noLockPrice = 0, noCurPrice = 0, other = 0;
+  for (const c of state.allContracts) {
+    c._pnlBps = null;
+    try {
+      const takerLower = (c.taker || '').toLowerCase();
+      if (takerLower === ZERO || !takerLower) { noTaker++; continue; }
+      if (!c.lockPrice || c.lockPrice === 0n) { noLockPrice++; continue; }
+      if (!state.currentPrice || state.currentPrice === 0n) { noCurPrice++; continue; }
+      const bps = Number((state.currentPrice - c.lockPrice) * 10000n / c.lockPrice);
+      if (Number.isFinite(bps)) {
+        c._pnlBps = bps;
+        nonNull++;
+      } else {
+        other++;
+      }
+    } catch (e) {
+      other++;
+      console.warn("pnl calc failed #" + c.id, e);
+    }
+  }
+  dlog(`盈亏统计: 有效 ${nonNull},无 taker ${noTaker},无 lockPrice ${noLockPrice},无当前价 ${noCurPrice},其他 ${other}`);
+  if (noCurPrice > 0) dlog(`⚠️ ${noCurPrice} 条无法计算因为当前价未读到,检查 pair/token 配置`);
+}
+
+// ============================================================================
 // 统计面板
 // ============================================================================
 function dashboard() {
@@ -542,12 +777,10 @@ function dashboard() {
   const contracts = state.allContracts;
   const price = state.currentPrice;
 
-  // 顶级
   document.getElementById('statCurPrice').textContent = price > 0n ? "$" + fmt(price, 6) : "--";
   document.getElementById('statTotal').textContent = state.nextId.toString();
   document.getElementById('statLoaded').textContent = contracts.length;
 
-  // 分类
   const active   = contracts.filter(c => c.isActive);
   const unfilled = active.filter(c => c.taker.toLowerCase() === ZERO);
   const filled   = active.filter(c => c.taker.toLowerCase() !== ZERO);
@@ -556,9 +789,7 @@ function dashboard() {
 
   document.getElementById('statActive').textContent = active.length;
 
-  // 资金 (sum of c.usdt in USD)
-  const sumUsd = (arr) => arr.reduce((a, c) =>
-    a + Number(ethers.formatUnits(c.usdt, 18)), 0);
+  const sumUsd = (arr) => arr.reduce((a, c) => a + Number(ethers.formatUnits(c.usdt, 18)), 0);
 
   const unfilledAmt = sumUsd(unfilled);
   const lockedAmt   = sumUsd(locked);
@@ -573,13 +804,12 @@ function dashboard() {
   document.getElementById('statReadyAmt').textContent = fmtUsd(readyAmt);
   document.getElementById('statTotalActiveAmt').textContent = fmtUsd(totalActive);
 
-  // 盈亏 (已接单活跃)
   let winCnt = 0, lossCnt = 0, winAmt = 0, lossAmt = 0, totalPnlPct = 0;
   const pnlList = [];
 
   filled.forEach(c => {
-    if (c.lockPrice === 0n || price === 0n) return;
-    const bps = Number((price - c.lockPrice) * 10000n / c.lockPrice);
+    if (c._pnlBps === null) return;
+    const bps = c._pnlBps;
     const usdt = Number(ethers.formatUnits(c.usdt, 18));
     const pnl = usdt * 2 * bps / 10000;
     pnlList.push({ contract: c, bps, pnl });
@@ -603,17 +833,607 @@ function dashboard() {
   netEl.textContent = (netPnl >= 0 ? '+' : '') + fmtUsd(netPnl);
   netEl.className = 'text-xl font-bold mono ' + (netPnl >= 0 ? 'text-green-400' : 'text-red-400');
 
-  // 参与者
   const makers = new Set(active.map(c => c.creator.toLowerCase()));
   const takers = new Set(filled.map(c => c.taker.toLowerCase()));
   document.getElementById('statMakers').textContent = makers.size;
   document.getElementById('statTakers').textContent = takers.size;
 
-  // 锁定价直方图
   renderHistogram(filled, price);
-
-  // Top 榜
   renderTopUsers(active, filled);
+  renderMyPnl();  // ★ 新增:渲染我的盈亏
+}
+
+// ============================================================================
+// 💼 我的盈亏 — USDT 利润 与 保证金扣费 分开
+//   USDT 利润 = G/2 (双方都直接到账)
+//   保证金扣费:
+//     Maker: 0
+//     Taker: (P + G/2) × 5%  (从保证金池扣)
+//     M+T:   (P + G/2) × 5%  (只 Taker 边扣一次)
+//   真实净 = USDT 利润 - 保证金扣费
+//   注意: LP 价格波动让保证金估值上下浮动,这部分不算入 P&L
+// ============================================================================
+function renderMyPnl() {
+  const myAddrs = (document.getElementById('myAddrs').value || '')
+    .split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const mySet = new Set(myAddrs);
+
+  const FEE_RATE = 0.05;
+
+  const makeBucket = () => ({
+    open:   { usdtWin: 0, usdtLoss: 0, winCnt: 0, lossCnt: 0, principalLocked: 0, fee: 0 },
+    closed: { usdtWin: 0, usdtLoss: 0, winCnt: 0, lossCnt: 0, principalReturned: 0, fee: 0 },
+  });
+  const b = { maker: makeBucket(), taker: makeBucket(), both: makeBucket() };
+  let countMaker = 0, countTaker = 0, countBoth = 0;
+  let grandUsdt = 0;
+  let grandFee = 0;
+  let grandPrincipalActive = 0;
+
+  for (const c of state.allContracts) {
+    if (c._pnlBps === null) continue;
+    const takerLower = c.taker.toLowerCase();
+    if (takerLower === ZERO) continue;
+
+    const creatorMine = mySet.has(c.creator.toLowerCase());
+    const takerMine   = mySet.has(takerLower);
+    if (!creatorMine && !takerMine) continue;
+
+    const isClosed = !c.isActive;
+    const bps = c._pnlBps;
+    const principal = Number(ethers.formatUnits(c.usdt, 18));
+    const grossPnl = principal * 2 * bps / 10000;
+    const myShare = grossPnl / 2;
+
+    let usdtPnl, marginFee, principalUsed, bucket;
+    if (creatorMine && takerMine) {
+      bucket = b.both;
+      usdtPnl = grossPnl;       // 整 G 都到 USDT
+      marginFee = Math.max(0, principal + myShare) * FEE_RATE;  // Taker 端扣一次
+      principalUsed = principal * 2;
+      countBoth++;
+    } else if (creatorMine) {
+      bucket = b.maker;
+      usdtPnl = myShare;
+      marginFee = 0;
+      principalUsed = principal;
+      countMaker++;
+    } else {
+      bucket = b.taker;
+      usdtPnl = myShare;
+      marginFee = Math.max(0, principal + myShare) * FEE_RATE;
+      principalUsed = principal;
+      countTaker++;
+    }
+
+    const slot = isClosed ? bucket.closed : bucket.open;
+    if (usdtPnl >= 0) { slot.usdtWin  += usdtPnl;  slot.winCnt++; }
+    else              { slot.usdtLoss += usdtPnl;  slot.lossCnt++; }
+    slot.fee += marginFee;
+    if (isClosed) {
+      slot.principalReturned += principalUsed;
+      // ⚠ 已关闭合约不计入头部合计 — 因为我们用的是 currentPrice 估值,跟实际平仓价不一样
+      // 实际平仓利润请点 🔍 同步真实利润
+    } else {
+      slot.principalLocked += principalUsed;
+      grandPrincipalActive += principalUsed;
+      grandUsdt += usdtPnl;       // 只累加未平仓的浮盈
+      grandFee += marginFee;
+    }
+  }
+
+  const set = (id, txt, cls) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = txt;
+    if (cls) el.className = cls;
+  };
+  const setBold = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = (val >= 0 ? '+' : '') + fmtUsd(val);
+    el.className = 'mono font-bold ' + (val >= 0 ? 'text-green-400' : 'text-red-400');
+  };
+
+  // ===== Maker (无扣费) =====
+  document.getElementById('myM_openWin').textContent  = '+' + fmtUsd(b.maker.open.usdtWin)  + ` (${b.maker.open.winCnt})`;
+  document.getElementById('myM_openLoss').textContent =       fmtUsd(b.maker.open.usdtLoss) + ` (${b.maker.open.lossCnt})`;
+  setBold('myM_openNet', b.maker.open.usdtWin + b.maker.open.usdtLoss);
+  set('myM_openLock', '$' + b.maker.open.principalLocked.toFixed(2), 'mono text-sky-300');
+
+  // 已关闭部分:不显示估算数字,只显示笔数(避免误导)
+  const mClosedCnt = b.maker.closed.winCnt + b.maker.closed.lossCnt;
+  document.getElementById('myM_closedWin').textContent  = mClosedCnt > 0 ? `(${mClosedCnt} 笔历史 — 已实现见头部)` : '—';
+  document.getElementById('myM_closedLoss').textContent = '—';
+  document.getElementById('myM_closedNet').textContent  = '—';
+  document.getElementById('myM_closedNet').className    = 'mono text-slate-500';
+
+  // ★ 合计只算未平仓(已关闭算不准,不混入)
+  setBold('myM_total', b.maker.open.usdtWin + b.maker.open.usdtLoss);
+
+  // ===== Taker =====
+  document.getElementById('myT_openWin').textContent  = '+' + fmtUsd(b.taker.open.usdtWin)  + ` (${b.taker.open.winCnt})`;
+  document.getElementById('myT_openLoss').textContent =       fmtUsd(b.taker.open.usdtLoss) + ` (${b.taker.open.lossCnt})`;
+  setBold('myT_openNet', b.taker.open.usdtWin + b.taker.open.usdtLoss);
+  set('myT_openLock', '$' + b.taker.open.principalLocked.toFixed(2), 'mono text-amber-300');
+  set('myT_openFee', '-$' + b.taker.open.fee.toFixed(2), 'mono text-red-400');
+
+  // 已关闭:不显示数字
+  const tClosedCnt = b.taker.closed.winCnt + b.taker.closed.lossCnt;
+  document.getElementById('myT_closedWin').textContent  = tClosedCnt > 0 ? `(${tClosedCnt} 笔历史 — 已实现见头部)` : '—';
+  document.getElementById('myT_closedLoss').textContent = '—';
+  document.getElementById('myT_closedNet').textContent  = '—';
+  document.getElementById('myT_closedNet').className    = 'mono text-slate-500';
+  document.getElementById('myT_closedFee').textContent  = '—';
+  document.getElementById('myT_closedFee').className    = 'mono text-slate-500';
+
+  // ★ 合计只算未平仓
+  const tUsdt = b.taker.open.usdtWin + b.taker.open.usdtLoss;
+  const tFee = b.taker.open.fee;
+  setBold('myT_total', tUsdt - tFee);
+
+  // ===== M+T =====
+  setBold('myB_open', b.both.open.usdtWin + b.both.open.usdtLoss);
+  document.getElementById('myB_closed').textContent = '—';
+  document.getElementById('myB_closed').className = 'mono text-slate-500';
+  setBold('myB_total', (b.both.open.usdtWin + b.both.open.usdtLoss) - b.both.open.fee);
+
+  // ===== 顶部总数 =====
+  setBold('myNetUsdt', grandUsdt);
+  set('myHdrFee', '-' + fmtUsd(grandFee), 'mono text-red-400 text-lg font-bold');
+  set('myHdrLocked', '$' + grandPrincipalActive.toFixed(2), 'mono text-cyan-300 text-lg font-bold');
+
+  // ★ 已实现 USDT (来自合约流水扫描)
+  let realizedTotal = 0;
+  let hasRealizedData = false;
+  let myMatchedCount = 0;
+  if (state.realPnlByUser) {
+    for (const a of myAddrs) {
+      const d = state.realPnlByUser[a.toLowerCase()];
+      if (d) {
+        realizedTotal += d.net;
+        hasRealizedData = true;
+        myMatchedCount++;
+      }
+    }
+  }
+
+  // 用"同步时间戳"判断是否同步过(更可靠)
+  const hasSyncedAtAll = !!state.realPnlSyncedAt;
+  const totalScannedUsers = state.realPnlByUser ? Object.keys(state.realPnlByUser).length : 0;
+
+  const realizedEl = document.getElementById('myRealizedUsdt');
+  if (hasSyncedAtAll) {
+    // 同步过了,显示数字(可能是 0)
+    realizedEl.textContent = (realizedTotal >= 0 ? '+' : '') + fmtUsd(realizedTotal);
+    if (realizedTotal > 0) realizedEl.className = 'mono text-lg font-bold text-green-400';
+    else if (realizedTotal < 0) realizedEl.className = 'mono text-lg font-bold text-red-400';
+    else realizedEl.className = 'mono text-lg font-bold text-slate-400';
+
+    const ago = Math.round((Date.now() - state.realPnlSyncedAt) / 60000);
+    if (myMatchedCount === 0) {
+      realizedEl.title = `${ago} 分钟前同步,扫描到 ${totalScannedUsers} 个用户。但你的地址都没找到 USDT 流水(可能在扫描范围外)。`;
+    } else {
+      realizedEl.title = `${ago} 分钟前同步 · 命中 ${myMatchedCount}/${myAddrs.length} 个地址 · 总计 ${totalScannedUsers} 用户的链上流水`;
+    }
+  } else {
+    realizedEl.textContent = '未同步';
+    realizedEl.className = 'mono text-lg font-bold text-amber-300';
+    realizedEl.title = '点击"🔍 同步真实利润"按钮';
+  }
+
+  // 真实净 = 浮动 + 已实现(同步过就用真实数据,否则只用浮动)
+  const floating = grandUsdt - grandFee;
+  const realNet = floating + (hasSyncedAtAll ? realizedTotal : 0);
+  setBold('myNetPnl', realNet);
+  document.getElementById('myNetPnl').className = 'text-2xl font-bold mono ' + (realNet >= 0 ? 'text-green-400' : 'text-red-400');
+  document.getElementById('myNetPnl').title = hasSyncedAtAll
+    ? `浮动 ${floating>=0?'+':''}$${floating.toFixed(2)} + 已实现 ${realizedTotal>=0?'+':''}$${realizedTotal.toFixed(2)}`
+    : '只有浮动盈亏(已实现未同步)';
+
+  document.getElementById('myContractCount').textContent = countMaker + countTaker + countBoth;
+  document.getElementById('myMakerCount').textContent = countMaker;
+  document.getElementById('myTakerCount').textContent = countTaker;
+  document.getElementById('myBothCount').textContent = countBoth;
+  const feeEl = document.getElementById('myTotalFees');
+  if (feeEl) feeEl.textContent = grandFee > 0 ? '-' + fmtUsd(grandFee) : '-$0.00';
+
+  // ★ 保存当前实时数据,供快照功能用
+  state.myPnlSummary = {
+    netPnl: realNet,
+    usdtProfit: grandUsdt,
+    realized: realizedTotal,
+    fees: grandFee,
+    locked: grandPrincipalActive,
+    contracts: countMaker + countTaker + countBoth,
+    countMaker, countTaker, countBoth,
+    price: state.currentPrice > 0n ? Number(ethers.formatUnits(state.currentPrice, 18)) : 0,
+    time: Date.now(),
+  };
+  renderSnapshots();
+  renderRealizedTable(myAddrs);  // 渲染已实现明细
+}
+
+// ============================================================================
+// 💵 已实现明细表 — 显示每个我的地址的真实利润
+// ============================================================================
+function renderRealizedTable(myAddrs) {
+  const panel = document.getElementById('realizedPanel');
+  const tbody = document.getElementById('realizedTableBody');
+  const countEl = document.getElementById('realizedCount');
+
+  // 用同步时间戳判断,而不是 realPnlByUser 是否非空
+  const hasSynced = !!state.realPnlSyncedAt;
+  if (!hasSynced || myAddrs.length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  // 收集每个我的地址的数据
+  const userMap = state.realPnlByUser || {};
+  const rows = [];
+  for (const a of myAddrs) {
+    const lower = a.toLowerCase();
+    const d = userMap[lower];
+    if (d) {
+      rows.push({ addr: a, ...d });
+    } else {
+      rows.push({ addr: a, in: 0, out: 0, txInCnt: 0, txOutCnt: 0, net: 0, noData: true });
+    }
+  }
+
+  // 按净值降序排
+  rows.sort((a, b) => b.net - a.net);
+
+  let totalIn = 0, totalOut = 0, totalNet = 0, totalIntx = 0, totalOuttx = 0;
+  for (const r of rows) {
+    totalIn += r.in;
+    totalOut += r.out;
+    totalNet += r.net;
+    totalIntx += r.txInCnt;
+    totalOuttx += r.txOutCnt;
+  }
+
+  countEl.textContent = rows.length;
+  panel.classList.remove('hidden');
+
+  tbody.innerHTML = rows.map(r => {
+    const netColor = r.net > 0 ? 'text-green-400' : r.net < 0 ? 'text-red-400' : 'text-slate-500';
+    const noDataMark = r.noData ? '<span class="text-slate-600 ml-1" title="未发现 USDT 流水">·</span>' : '';
+    return `
+      <tr class="border-t border-slate-700/40 hover:bg-slate-800/30">
+        <td class="px-3 py-1.5">
+          <a href="https://bscscan.com/address/${r.addr}" target="_blank" class="mono text-purple-400 hover:underline">${shortAddr(r.addr)}</a>${noDataMark}
+        </td>
+        <td class="px-3 py-1.5 text-right mono text-red-300" title="向合约转入 USDT (创建/接受合约)">-$${r.out.toFixed(2)}</td>
+        <td class="px-3 py-1.5 text-right mono text-green-300" title="合约转出 USDT (平仓/取消)">+$${r.in.toFixed(2)}</td>
+        <td class="px-3 py-1.5 text-right mono font-bold ${netColor}">${r.net >= 0 ? '+' : ''}$${r.net.toFixed(2)}</td>
+        <td class="px-3 py-1.5 text-right mono text-slate-500 text-xs">${r.txInCnt} 入 / ${r.txOutCnt} 出</td>
+      </tr>
+    `;
+  }).join('') + `
+    <tr class="border-t-2 border-slate-500 bg-slate-900/70 font-bold">
+      <td class="px-3 py-2 text-slate-300">合计 (${rows.length} 个地址)</td>
+      <td class="px-3 py-2 text-right mono text-red-400">-$${totalOut.toFixed(2)}</td>
+      <td class="px-3 py-2 text-right mono text-green-400">+$${totalIn.toFixed(2)}</td>
+      <td class="px-3 py-2 text-right mono ${totalNet >= 0 ? 'text-green-400' : 'text-red-400'}">${totalNet >= 0 ? '+' : ''}$${totalNet.toFixed(2)}</td>
+      <td class="px-3 py-2 text-right mono text-slate-500 text-xs">${totalIntx} / ${totalOuttx}</td>
+    </tr>
+  `;
+}
+
+// ============================================================================
+// 📸 快照系统:保存"此刻的状态"到 localStorage,跟当前实时对比
+// ============================================================================
+function getSnapshots() {
+  try { return JSON.parse(localStorage.getItem('chaos_snapshots') || '[]'); }
+  catch { return []; }
+}
+function saveSnapshots(arr) {
+  localStorage.setItem('chaos_snapshots', JSON.stringify(arr));
+}
+
+// ============================================================================
+// 🔍 同步真实利润 — 扫合约 USDT 流水(只 1 次合约扫描,所有用户数据)
+// 一次扫描所有用户 (合约 1 个,而非按地址 14 个)
+// 数据源:链上真实 USDT Transfer,跟着钱走 100% 准确
+// ============================================================================
+async function syncRealPnl() {
+  const btn = document.getElementById('syncRealBtn');
+  const progBox = document.getElementById('syncProgress');
+  const progBar = document.getElementById('syncProgressBar');
+  const progText = document.getElementById('syncProgressText');
+  const eventCount = document.getElementById('syncEventCount');
+
+  if (!provider) {
+    alert('请先点"刷新"加载合约数据');
+    return;
+  }
+  if (state.allContracts.length === 0) {
+    alert('请先点"刷新"加载合约数据');
+    return;
+  }
+  btn.disabled = true;
+  progBox.classList.remove('hidden');
+  progBox.classList.add('inline-flex');
+  progBar.style.width = '0%';
+  progText.textContent = '准备…';
+  eventCount.textContent = '';
+  const t0 = Date.now();
+
+  try {
+    dlog("━━━ 同步真实利润(扫合约 USDT 流水)━━━");
+
+    // 反推扫描起点:用最早合约的 createTime
+    const earliestCreate = state.allContracts.reduce(
+      (min, c) => c.createTime > 0 && c.createTime < min ? c.createTime : min,
+      Math.floor(Date.now() / 1000)
+    );
+    const latest = await provider.getBlockNumber();
+    const latestBlk = await provider.getBlock(latest);
+    const sampleBack = 50000;
+    const sampleBlk = await provider.getBlock(Math.max(1, latest - sampleBack));
+    const blockTime = (latestBlk.timestamp - sampleBlk.timestamp) / sampleBack;
+    dlog(`实测块时间: ${blockTime.toFixed(3)} 秒`);
+
+    const fromBlock = Math.max(0, latest - Math.ceil((latestBlk.timestamp - earliestCreate) / blockTime));
+    dlog(`扫块 ${fromBlock} → ${latest} (${((latest-fromBlock)*blockTime/86400).toFixed(2)} 天)`);
+
+    // 准备扫描
+    const padded = a => '0x' + '0'.repeat(24) + a.slice(2).toLowerCase();
+    const BATCH = 5000;
+    const tasks = [];
+    for (let s = fromBlock; s <= latest; s += BATCH) {
+      tasks.push([s, Math.min(s + BATCH - 1, latest)]);
+    }
+    dlog(`共 ${tasks.length} 批,每批 ${BATCH} 块,并发 8`);
+
+    const allIns = [], allOuts = [];
+    let done = 0, errCnt = 0;
+
+    // 并发跑
+    const PARALLEL = 20;  // 加大并发提速
+    let idx = 0;
+    async function worker() {
+      while (idx < tasks.length) {
+        const myIdx = idx++;
+        const [s, e] = tasks[myIdx];
+        try {
+          const [ins, outs] = await Promise.all([
+            provider.getLogs({
+              address: USDT, fromBlock: s, toBlock: e,
+              topics: [TRANSFER_SIG, null, padded(PROXY)]
+            }),
+            provider.getLogs({
+              address: USDT, fromBlock: s, toBlock: e,
+              topics: [TRANSFER_SIG, padded(PROXY), null]
+            }),
+          ]);
+          allIns.push(...ins);
+          allOuts.push(...outs);
+        } catch (err) {
+          // 重试一次,块范围减半
+          if (e - s > 100) {
+            const m = Math.floor((s + e) / 2);
+            try {
+              const [ins1, outs1] = await Promise.all([
+                provider.getLogs({ address: USDT, fromBlock: s, toBlock: m,
+                  topics: [TRANSFER_SIG, null, padded(PROXY)] }),
+                provider.getLogs({ address: USDT, fromBlock: s, toBlock: m,
+                  topics: [TRANSFER_SIG, padded(PROXY), null] }),
+              ]);
+              const [ins2, outs2] = await Promise.all([
+                provider.getLogs({ address: USDT, fromBlock: m+1, toBlock: e,
+                  topics: [TRANSFER_SIG, null, padded(PROXY)] }),
+                provider.getLogs({ address: USDT, fromBlock: m+1, toBlock: e,
+                  topics: [TRANSFER_SIG, padded(PROXY), null] }),
+              ]);
+              allIns.push(...ins1, ...ins2);
+              allOuts.push(...outs1, ...outs2);
+            } catch (e2) { errCnt++; }
+          } else {
+            errCnt++;
+          }
+        }
+        done++;
+        const pct = Math.round(done / tasks.length * 100);
+        progBar.style.width = pct + '%';
+        progText.textContent = `${done}/${tasks.length} (${pct}%)`;
+        eventCount.textContent = `· ${allIns.length + allOuts.length} 事件`;
+      }
+    }
+    await Promise.all(Array(PARALLEL).fill(0).map(() => worker()));
+
+    dlog(`扫到 ${allIns.length} IN + ${allOuts.length} OUT (失败 ${errCnt} 批)`);
+
+    // 按用户聚合(用 BigInt 算精度高,最后转 Number)
+    const realPnl = {};  // 小写地址 → { in, out, txInCnt, txOutCnt }
+    const ensure = (a) => { if (!realPnl[a]) realPnl[a] = { in: 0n, out: 0n, txInCnt: 0, txOutCnt: 0 }; };
+
+    for (const log of allIns) {
+      const user = '0x' + log.topics[1].slice(26).toLowerCase();
+      ensure(user);
+      realPnl[user].out += BigInt(log.data);  // 用户付给合约 = 用户 OUT
+      realPnl[user].txOutCnt++;
+    }
+    for (const log of allOuts) {
+      const user = '0x' + log.topics[2].slice(26).toLowerCase();
+      ensure(user);
+      realPnl[user].in += BigInt(log.data);   // 合约转给用户 = 用户 IN
+      realPnl[user].txInCnt++;
+    }
+
+    // 转 Number 储存
+    state.realPnlByUser = {};
+    for (const [user, d] of Object.entries(realPnl)) {
+      state.realPnlByUser[user] = {
+        in:  Number(ethers.formatUnits(d.in, 18)),
+        out: Number(ethers.formatUnits(d.out, 18)),
+        txInCnt: d.txInCnt,
+        txOutCnt: d.txOutCnt,
+        net: Number(ethers.formatUnits(d.in - d.out, 18)),
+      };
+    }
+    state.realPnlSyncedAt = Date.now();
+    state.realPnlSyncedBlock = latest;
+
+    // 存到 localStorage(缓存所有用户数据,体积约 1-3MB,localStorage 限制 5-10MB 够用)
+    try {
+      const cache = {
+        syncedAt: state.realPnlSyncedAt,
+        syncedBlock: latest,
+        data: state.realPnlByUser,  // 全部 user 数据
+      };
+      const json = JSON.stringify(cache);
+      if (json.length > 4 * 1024 * 1024) {
+        // 超过 4MB 改成只存 myAddrs
+        const myAddrs = (document.getElementById('myAddrs').value || '')
+          .split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+        const filtered = {};
+        for (const a of myAddrs) {
+          if (state.realPnlByUser[a]) filtered[a] = state.realPnlByUser[a];
+        }
+        localStorage.setItem('chaos_real_pnl', JSON.stringify({
+          syncedAt: state.realPnlSyncedAt, syncedBlock: latest, data: filtered, partial: true
+        }));
+        dlog(`📦 缓存过大,只存我的地址数据`);
+      } else {
+        localStorage.setItem('chaos_real_pnl', json);
+        dlog(`📦 缓存了 ${Object.keys(state.realPnlByUser).length} 个地址数据 (${(json.length/1024).toFixed(0)}KB)`);
+      }
+    } catch (e) {
+      dlog(`⚠️ 缓存失败: ${e.message}`);
+    }
+
+    const dt = ((Date.now() - t0) / 1000).toFixed(1);
+    const totalUsers = Object.keys(state.realPnlByUser).length;
+    dlog(`✓ 同步完成: ${totalUsers} 个地址,耗时 ${dt}s`);
+
+    // 诊断:看看用户的地址有没有匹配
+    const myAddrsList = (document.getElementById('myAddrs').value || '')
+      .split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+    let myMatched = 0, myNotFound = [];
+    for (const a of myAddrsList) {
+      if (state.realPnlByUser[a]) myMatched++;
+      else myNotFound.push(a);
+    }
+    dlog(`你的 ${myAddrsList.length} 个地址中有 ${myMatched} 个找到流水`);
+    if (myMatched === 0 && myAddrsList.length > 0) {
+      dlog(`⚠️ 一个都没匹配上!可能原因:`);
+      dlog(`  · 你的地址跟太初合约没有过 USDT 互动`);
+      dlog(`  · 扫描时间范围不够(扫了 ${tasks.length * 5000} 块 ≈ ${(tasks.length * 5000 * blockTime / 86400).toFixed(1)} 天)`);
+      dlog(`  · 地址写错了`);
+      dlog(`  示例:扫到的前 3 个地址: ${Object.keys(state.realPnlByUser).slice(0,3).join(', ')}`);
+      dlog(`  你的地址: ${myAddrsList.slice(0,3).join(', ')}`);
+    } else if (myMatched > 0) {
+      dlog(`✓ 找到的地址包括: ${Object.keys(state.realPnlByUser).filter(a => myAddrsList.includes(a)).slice(0,3).join(', ')}`);
+    }
+
+    progText.textContent = `✓ ${dt}s · 命中 ${myMatched}/${myAddrsList.length}`;
+    progBar.style.width = '100%';
+
+    renderMyPnl();
+    setTimeout(() => {
+      progBox.classList.add('hidden');
+      progBox.classList.remove('inline-flex');
+    }, 4000);
+  } catch (e) {
+    dlog(`❌ 同步失败: ${e.message}`);
+    progText.textContent = '❌ ' + e.message.slice(0, 40);
+    progBar.style.background = '#dc2626';
+    setTimeout(() => {
+      progBox.classList.add('hidden');
+      progBox.classList.remove('inline-flex');
+      progBar.style.background = '';
+    }, 5000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 启动时尝试加载缓存
+function loadRealPnlCache() {
+  try {
+    const cache = JSON.parse(localStorage.getItem('chaos_real_pnl') || 'null');
+    if (cache && cache.data) {
+      state.realPnlByUser = cache.data;
+      state.realPnlSyncedAt = cache.syncedAt;
+      dlog(`💾 已加载缓存的真实利润数据(同步于 ${new Date(cache.syncedAt).toLocaleString('zh-CN')})`);
+    }
+  } catch {}
+}
+
+function takeSnapshot() {
+  if (!state.myPnlSummary) {
+    alert('请先扫描完成再保存快照');
+    return;
+  }
+  const snap = { ...state.myPnlSummary, label: prompt('给这个快照起个名字(可留空)', '') || '' };
+  const arr = getSnapshots();
+  arr.unshift(snap);
+  if (arr.length > 20) arr.length = 20;  // 最多 20 个
+  saveSnapshots(arr);
+  renderSnapshots();
+}
+
+function deleteSnapshot(idx) {
+  if (!confirm('删除这个快照?')) return;
+  const arr = getSnapshots();
+  arr.splice(idx, 1);
+  saveSnapshots(arr);
+  renderSnapshots();
+}
+
+function renderSnapshots() {
+  const panel = document.getElementById('snapshotPanel');
+  const list = document.getElementById('snapshotList');
+  const count = document.getElementById('snapshotCount');
+  if (!panel || !list) return;
+
+  const arr = getSnapshots();
+  count.textContent = arr.length;
+  if (arr.length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+
+  const cur = state.myPnlSummary || { netPnl: 0, price: 0, locked: 0, fees: 0, usdtProfit: 0 };
+
+  list.innerHTML = arr.map((s, i) => {
+    const dt = new Date(s.time);
+    const dateStr = dt.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+    const dNet = cur.netPnl - s.netPnl;
+    const dPrice = cur.price - s.price;
+    const dPriceBps = s.price > 0 ? (dPrice / s.price * 100) : 0;
+
+    const dColor = dNet >= 0 ? 'text-green-400' : 'text-red-400';
+    const priceColor = dPrice >= 0 ? 'text-green-400' : 'text-red-400';
+    const arrow = dNet >= 0 ? '↑' : '↓';
+    const trend = dNet > 0 ? '修复 / 增收' : dNet < 0 ? '恶化 / 减少' : '无变化';
+
+    const labelHtml = s.label ? `<span class="text-purple-300 mr-2">"${s.label}"</span>` : '';
+
+    return `
+      <div class="bg-slate-900/50 rounded p-2 text-xs">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 flex-wrap">
+            ${labelHtml}
+            <span class="text-slate-400 mono">${dateStr}</span>
+            <span class="text-slate-500">价 $${s.price.toFixed(6)} → $${cur.price.toFixed(6)} <span class="${priceColor}">(${dPrice>=0?'+':''}${dPriceBps.toFixed(2)}%)</span></span>
+          </div>
+          <button onclick="deleteSnapshot(${i})" class="text-red-500 hover:text-red-300 text-xs">✕</button>
+        </div>
+        <div class="flex items-center gap-4 flex-wrap mt-1">
+          <span class="text-slate-400">净盈亏: 当时 <span class="mono ${s.netPnl>=0?'text-green-400':'text-red-400'}">${s.netPnl>=0?'+':''}$${s.netPnl.toFixed(2)}</span></span>
+          <span class="text-slate-400">→ 现在 <span class="mono ${cur.netPnl>=0?'text-green-400':'text-red-400'}">${cur.netPnl>=0?'+':''}$${cur.netPnl.toFixed(2)}</span></span>
+          <span class="font-bold ${dColor}">${arrow} ${dNet>=0?'+':''}$${Math.abs(dNet).toFixed(2)}</span>
+          <span class="text-slate-500">(${trend})</span>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 function renderHistogram(filled, currentPrice) {
@@ -658,7 +1478,6 @@ function renderHistogram(filled, currentPrice) {
 }
 
 function renderTopUsers(active, filled) {
-  // Maker aggregate: by creator
   const makerMap = {};
   for (const c of active) {
     const addr = c.creator.toLowerCase();
@@ -704,11 +1523,13 @@ function renderTopUsers(active, filled) {
 function render() {
   const now = Math.floor(Date.now() / 1000);
   const status = document.getElementById('fltStatus').value;
+  const roleFilter = document.getElementById('fltRole').value;
   const sort = document.getElementById('fltSort').value;
   const addr = document.getElementById('fltAddr').value.trim().toLowerCase();
   const pageSize = parseInt(document.getElementById('fltPageSize').value);
   const myAddrs = (document.getElementById('myAddrs').value || '')
     .split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const mySet = new Set(myAddrs);
 
   let list = state.allContracts.slice();
 
@@ -727,17 +1548,37 @@ function render() {
     }
   });
 
+  // 角色过滤
+  if (roleFilter !== 'all') {
+    list = list.filter(c => {
+      const creatorMine = mySet.has(c.creator.toLowerCase());
+      const takerLower = c.taker.toLowerCase();
+      const takerMine = takerLower !== ZERO && mySet.has(takerLower);
+      switch (roleFilter) {
+        case "mine": return creatorMine || takerMine;
+        case "maker": return creatorMine;
+        case "taker": return takerMine;
+        case "none": return !creatorMine && !takerMine;
+      }
+    });
+  }
+
   if (addr) {
     list = list.filter(c => c.creator.toLowerCase().includes(addr) || c.taker.toLowerCase().includes(addr));
   }
 
-  list.forEach(c => {
-    if (c.taker.toLowerCase() !== ZERO && c.lockPrice > 0n && state.currentPrice > 0n) {
-      c._pnlBps = Number((state.currentPrice - c.lockPrice) * 10000n / c.lockPrice);
-    } else c._pnlBps = null;
-  });
-
   list.sort((a, b) => {
+    // 最高优先级:我的合约置顶
+    const aMine = mySet.has(a.creator.toLowerCase()) || mySet.has(a.taker.toLowerCase());
+    const bMine = mySet.has(b.creator.toLowerCase()) || mySet.has(b.taker.toLowerCase());
+    if (aMine !== bMine) return aMine ? -1 : 1;
+
+    // 我的合约内部:未平仓的优先(还在跑的更值得看)
+    if (aMine && bMine) {
+      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    }
+
+    // 用户选的排序
     switch (sort) {
       case "id_desc": return Number(b.id - a.id);
       case "id_asc": return Number(a.id - b.id);
@@ -748,16 +1589,35 @@ function render() {
     }
   });
 
+  // 计数条:在切片之前,记录匹配总数
+  const matchedCount = list.length;
+  const chainTotal = Number(state.nextId - 1n);
+  const loadedTotal = state.allContracts.length;
+
   list = list.slice(0, pageSize);
+
+  // 填充计数条
+  const counter = document.getElementById('tblCounter');
+  const truncated = matchedCount > pageSize;
+  const dataComplete = loadedTotal >= chainTotal * 0.95;
+  counter.classList.remove('hidden');
+  counter.innerHTML = `
+    <span class="text-slate-400">显示 <span class="font-bold text-slate-200">${list.length}</span> 条</span>
+    · 过滤后 <span class="font-bold text-slate-200">${matchedCount}</span> 条匹配
+    · 已加载 <span class="font-bold ${dataComplete ? 'text-green-400' : 'text-yellow-400'}">${loadedTotal}</span> / ${chainTotal} 条链上合约 ${dataComplete ? '✓' : '⚠️'}
+    ${truncated ? `<span class="ml-3 text-yellow-400">⚠️ 还有 ${matchedCount - pageSize} 条未显示,右上角把"显示条数"改成 <strong>全部</strong> 或更大</span>` : ''}
+    ${!dataComplete ? `<span class="ml-3 text-yellow-400">⚠️ 数据不全(${(loadedTotal/chainTotal*100).toFixed(0)}%),点 ↻ 刷新 重试,或换 RPC</span>` : ''}
+  `;
 
   const tbody = document.getElementById('tblBody');
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" class="text-center p-10 text-slate-500">无匹配结果</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="text-center p-10 text-slate-500">无匹配结果</td></tr>';
     return;
   }
 
   tbody.innerHTML = list.map(c => {
-    const isUnfilled = c.taker.toLowerCase() === ZERO;
+    const takerLower = c.taker.toLowerCase();
+    const isUnfilled = takerLower === ZERO;
     const isClosed = !c.isActive;
     const remaining = c.cooldownEnd - now;
 
@@ -776,31 +1636,98 @@ function render() {
       cdStr = '<span class="text-green-400">已到期</span>';
     }
 
-    let priceDiffStr = '—', pnlStr = '—';
-    if (!isUnfilled && !isClosed && c._pnlBps !== null) {
-      const bps = c._pnlBps;
-      const color = bps >= 0 ? 'text-green-400' : 'text-red-400';
-      priceDiffStr = `<span class="${color}">${bps>=0?'+':''}${(bps/100).toFixed(2)}%</span>`;
-      const usdt = Number(ethers.formatUnits(c.usdt, 18));
-      const pnl = usdt * 2 * bps / 10000;
-      pnlStr = `<span class="${color}">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>`;
+    // ★ 按我的角色配色 (移到盈亏计算之前,因为净利计算需要角色)
+    const creatorLower = c.creator.toLowerCase();
+    const creatorMine = mySet.has(creatorLower);
+    const takerMine = !isUnfilled && mySet.has(takerLower);
+
+    let rowClass, roleBadge;
+    if (creatorMine && takerMine) {
+      rowClass = 'role-both';
+      roleBadge = '<span class="px-1.5 py-0.5 rounded bg-purple-600/50 text-purple-100 text-xs font-semibold" title="既是 Maker 又是 Taker">M+T</span>';
+    } else if (creatorMine) {
+      rowClass = 'role-maker';
+      roleBadge = '<span class="px-1.5 py-0.5 rounded bg-sky-600/50 text-sky-100 text-xs font-semibold" title="我是 Maker — 本金受保护">M</span>';
+    } else if (takerMine) {
+      rowClass = 'role-taker';
+      roleBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-600/50 text-amber-100 text-xs font-semibold" title="我是 Taker — 承担价差风险">T</span>';
+    } else {
+      rowClass = '';
+      roleBadge = '<span class="text-slate-600 text-xs">—</span>';
     }
 
-    const creatorMine = myAddrs.includes(c.creator.toLowerCase());
-    const takerMine = myAddrs.includes(c.taker.toLowerCase());
-    const rowHl = (creatorMine || takerMine) ? 'bg-purple-900/20' : '';
+    const creatorCls = creatorMine ? 'text-sky-300 font-bold' : 'hover:text-purple-400';
+    const takerCls   = takerMine   ? 'text-amber-300 font-bold' : 'hover:text-purple-400';
+
+    // ★ 盈亏 + 我的净盈亏(扣手续费)
+    let priceDiffStr, pnlStr, myNetStr;
+    if (isUnfilled) {
+      priceDiffStr = pnlStr = myNetStr = '<span class="text-slate-600">—</span>';
+    } else if (c._pnlBps === null) {
+      if (!c.lockPrice || c.lockPrice === 0n) {
+        priceDiffStr = pnlStr = myNetStr = '<span class="text-slate-500" title="合约的 lockPrice 为 0">— (无锁价)</span>';
+      } else if (!state.currentPrice || state.currentPrice === 0n) {
+        priceDiffStr = pnlStr = myNetStr = '<span class="text-red-500" title="当前价读取失败">⚠ 无价</span>';
+      } else {
+        priceDiffStr = pnlStr = myNetStr = '<span class="text-slate-500">—</span>';
+      }
+    } else {
+      const bps = c._pnlBps;
+      const color = bps >= 0 ? 'text-green-400' : 'text-red-400';
+      const suffix = isClosed ? '<span class="text-slate-500 text-xs ml-1" title="假设持有至今">*</span>' : '';
+      priceDiffStr = `<span class="${color}">${bps>=0?'+':''}${(bps/100).toFixed(2)}%${suffix}</span>`;
+      const principal = Number(ethers.formatUnits(c.usdt, 18));
+      const grossPnl = principal * 2 * bps / 10000;
+      pnlStr = `<span class="${color}">${grossPnl>=0?'+':''}$${grossPnl.toFixed(2)}${suffix}</span>`;
+
+      // 我的净 — 根据角色算扣完手续费的实际盈亏
+      const myShare = grossPnl / 2;
+      const FEE_RATE = 0.05;
+      let myNet, hint;
+      if (creatorMine && takerMine) {
+        const fee = Math.max(0, principal + myShare) * FEE_RATE;
+        myNet = grossPnl - fee;
+        hint = `M+T: G - 费 = ${grossPnl.toFixed(2)} - ${fee.toFixed(2)}`;
+      } else if (creatorMine) {
+        myNet = myShare;
+        hint = `Maker: G/2 = ${myShare.toFixed(2)}(无费)`;
+      } else if (takerMine) {
+        const fee = Math.max(0, principal + myShare) * FEE_RATE;
+        myNet = myShare - fee;
+        hint = `Taker: G/2 - 费 = ${myShare.toFixed(2)} - ${fee.toFixed(2)}`;
+      } else {
+        myNet = null;
+      }
+
+      if (myNet === null) {
+        myNetStr = '<span class="text-slate-600">—</span>';
+      } else {
+        const myColor = myNet >= 0 ? 'text-green-400' : 'text-red-400';
+        // 标识能否覆盖手续费(对 Taker 来说,价格涨幅小时净亏)
+        let icon = '';
+        if (takerMine && bps > 0 && myNet < 0) icon = ' <span class="text-red-500" title="价格涨了但手续费没覆盖,净亏">⚠</span>';
+        // 已关闭 → 不显示数字(monitor 用当前价估值不准,点 🔍 同步真实利润)
+        if (isClosed) {
+          myNetStr = '<span class="text-slate-600" title="已关闭合约的已平仓利润请点 🔍 同步真实利润看真实数字">—</span>';
+        } else {
+          myNetStr = `<span class="${myColor} font-semibold" title="${hint}">${myNet>=0?'+':''}$${myNet.toFixed(2)}${icon}</span>`;
+        }
+      }
+    }
 
     return `
-      <tr class="tbl-row border-t border-slate-700/50 ${rowHl}">
+      <tr class="tbl-row border-t border-slate-700/50 ${rowClass}">
         <td class="px-3 py-2 mono">#${c.id}</td>
         <td class="px-3 py-2">${statusBadge}</td>
-        <td class="px-3 py-2"><a href="https://bscscan.com/address/${c.creator}" target="_blank" class="mono hover:text-purple-400 ${creatorMine?'text-purple-400 font-bold':''}">${shortAddr(c.creator)}</a></td>
-        <td class="px-3 py-2">${isUnfilled ? '<span class="text-slate-500">—</span>' : `<a href="https://bscscan.com/address/${c.taker}" target="_blank" class="mono hover:text-purple-400 ${takerMine?'text-purple-400 font-bold':''}">${shortAddr(c.taker)}</a>`}</td>
+        <td class="px-3 py-2 text-center">${roleBadge}</td>
+        <td class="px-3 py-2"><a href="https://bscscan.com/address/${c.creator}" target="_blank" class="mono ${creatorCls}">${shortAddr(c.creator)}</a></td>
+        <td class="px-3 py-2">${isUnfilled ? '<span class="text-slate-500">—</span>' : `<a href="https://bscscan.com/address/${c.taker}" target="_blank" class="mono ${takerCls}">${shortAddr(c.taker)}</a>`}</td>
         <td class="px-3 py-2 text-right mono">$${fmt(c.usdt)}</td>
         <td class="px-3 py-2 text-right mono text-slate-400">${isUnfilled?'—':fmt(c.tokenAmount)}</td>
         <td class="px-3 py-2 text-right mono">${isUnfilled?'—':'$'+fmt(c.lockPrice,6)}</td>
         <td class="px-3 py-2 text-right mono">${priceDiffStr}</td>
         <td class="px-3 py-2 text-right mono">${pnlStr}</td>
+        <td class="px-3 py-2 text-right mono">${myNetStr}</td>
         <td class="px-3 py-2 text-sm">${cdStr}</td>
       </tr>
     `;
@@ -810,7 +1737,7 @@ function render() {
 // ============================================================================
 // 事件
 // ============================================================================
-const DEFAULT_RPC = "https://bsc-dataseed.binance.org";
+const DEFAULT_RPC = "https://rpc.ankr.com/bsc";
 document.getElementById('rpcInput').value = localStorage.getItem("bsc_rpc") || DEFAULT_RPC;
 
 document.getElementById('saveRpcBtn').addEventListener('click', () => {
@@ -824,17 +1751,53 @@ document.getElementById('rpcPreset').addEventListener('change', e => {
 });
 document.getElementById('refreshBtn').addEventListener('click', refresh);
 document.getElementById('cancelBtn').addEventListener('click', () => { cancelFlag = true; });
+document.getElementById('snapshotBtn').addEventListener('click', takeSnapshot);
+document.getElementById('syncRealBtn').addEventListener('click', syncRealPnl);
 
-['fltStatus','fltSort','fltAddr','myAddrs','fltPageSize'].forEach(id => {
+['fltStatus','fltRole','fltSort','fltAddr','fltPageSize'].forEach(id => {
   document.getElementById(id).addEventListener('input', render);
 });
 
-document.getElementById('myAddrs').value = localStorage.getItem("my_addrs") || "";
-document.getElementById('myAddrs').addEventListener('change', e => {
-  localStorage.setItem("my_addrs", e.target.value);
+// 启动:加载缓存的真实利润数据
+loadRealPnlCache();
+// 启动时渲染快照
+renderSnapshots();
+
+// 公开版: 不预填地址
+const MY_ADDRESSES = "";
+
+document.getElementById('resetAddrsBtn').addEventListener('click', () => {
+  if (confirm("确定清空所有地址?")) {
+    document.getElementById('myAddrs').value = "";
+    localStorage.removeItem("my_addrs");
+    updateMyAddrCount();
+    renderMyPnl();
+    render();
+  }
 });
 
-// 启动
+document.getElementById('myAddrs').value = localStorage.getItem("my_addrs") || "";
+
+function updateMyAddrCount() {
+  const text = document.getElementById('myAddrs').value;
+  const list = text.split(/[,\s;]+/).map(s => s.trim()).filter(s => s.length > 0);
+  let validCount = 0, invalidCount = 0;
+  for (const a of list) {
+    try { ethers.getAddress(a); validCount++; } catch { invalidCount++; }
+  }
+  const el = document.getElementById('myAddrCount');
+  if (list.length === 0) el.textContent = '';
+  else if (invalidCount === 0) el.textContent = `✓ ${validCount} 个地址`;
+  else el.textContent = `⚠️ ${validCount} 有效 / ${invalidCount} 无效`;
+  localStorage.setItem("my_addrs", text);
+}
+document.getElementById('myAddrs').addEventListener('input', () => {
+  updateMyAddrCount();
+  renderMyPnl();  // 地址改变,重算我的盈亏
+  render();
+});
+updateMyAddrCount();
+
 dlog("页面加载完成,ethers 版本: " + (ethers.version || '?'));
 if (initProvider(document.getElementById('rpcInput').value)) {
   refresh();
