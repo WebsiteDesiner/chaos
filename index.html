@@ -168,8 +168,8 @@
 
     <!-- 提示 -->
     <div class="bg-slate-900/40 border border-slate-700/50 rounded p-2 mb-3 text-xs text-slate-300 space-y-1">
-      <div>📐 <strong>浮动盈亏</strong> = 未平仓合约按当前价的浮盈 · USDT 利润 = G÷2 · Taker 扣 (P+G/2)×5%</div>
-      <div class="text-amber-300">💵 <strong>已实现 USDT</strong> = 扫合约 USDT 流水算出来的真实历史利润(IN−OUT),覆盖所有已平仓+取消的合约 · 点 🔍 按钮同步,数据缓存在浏览器</div>
+      <div>📐 <strong>毛利公式</strong>: G = P × 2 × 涨幅,但 <strong>|G| ≤ P</strong>(涨跌 > 50% 溢出归 LP 池) · 每方 G÷2 · Taker 还扣 (P+G/2)×5%</div>
+      <div class="text-amber-300">💵 <strong>已实现 USDT</strong> = 扫合约 USDT 流水算出来的真实历史利润(IN−OUT)· 点 🔍 同步,数据缓存浏览器</div>
       <div class="text-slate-400">💡 真实净 = 浮动 + 已实现 ≈ 你账户最终的总盈亏</div>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
@@ -811,7 +811,8 @@ function dashboard() {
     if (c._pnlBps === null) return;
     const bps = c._pnlBps;
     const usdt = Number(ethers.formatUnits(c.usdt, 18));
-    const pnl = usdt * 2 * bps / 10000;
+    const rawPnl = usdt * 2 * bps / 10000;
+    const pnl = Math.max(-usdt, Math.min(usdt, rawPnl));  // ★ G 上限 ±P (溢出归 LP)
     pnlList.push({ contract: c, bps, pnl });
     totalPnlPct += bps;
     if (pnl > 0) { winCnt++; winAmt += pnl; }
@@ -882,7 +883,9 @@ function renderMyPnl() {
     const isClosed = !c.isActive;
     const bps = c._pnlBps;
     const principal = Number(ethers.formatUnits(c.usdt, 18));
-    const grossPnl = principal * 2 * bps / 10000;
+    const rawG = principal * 2 * bps / 10000;
+    // ★ G 上限 ±P:涨跌 > 50% 时,超出部分溢出到 LP 池(保证金升值),双方实际只能拿 ±P
+    const grossPnl = Math.max(-principal, Math.min(principal, rawG));
     const myShare = grossPnl / 2;
 
     let usdtPnl, marginFee, principalUsed, bucket;
@@ -1677,8 +1680,12 @@ function render() {
       const suffix = isClosed ? '<span class="text-slate-500 text-xs ml-1" title="假设持有至今">*</span>' : '';
       priceDiffStr = `<span class="${color}">${bps>=0?'+':''}${(bps/100).toFixed(2)}%${suffix}</span>`;
       const principal = Number(ethers.formatUnits(c.usdt, 18));
-      const grossPnl = principal * 2 * bps / 10000;
-      pnlStr = `<span class="${color}">${grossPnl>=0?'+':''}$${grossPnl.toFixed(2)}${suffix}</span>`;
+      const rawG = principal * 2 * bps / 10000;
+      // ★ G 上限 ±P (涨跌>50% 时溢出归 LP)
+      const grossPnl = Math.max(-principal, Math.min(principal, rawG));
+      const overflow = Math.abs(rawG) > principal;
+      const overflowMark = overflow ? '<span class="text-purple-400 text-xs ml-1" title="超出 P,溢出归 LP 池">⤴</span>' : '';
+      pnlStr = `<span class="${color}">${grossPnl>=0?'+':''}$${grossPnl.toFixed(2)}${overflowMark}${suffix}</span>`;
 
       // 我的净 — 根据角色算扣完手续费的实际盈亏
       const myShare = grossPnl / 2;
