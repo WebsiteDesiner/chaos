@@ -400,6 +400,37 @@
         </select>
       </div>
     </div>
+
+    <!-- 📊 全市场总览统计 -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div class="bg-slate-900/40 rounded-lg p-3">
+        <div class="text-xs text-slate-400">📦 全市场总额度</div>
+        <div id="limitTotalAll" class="text-lg font-bold mono text-slate-200 mt-1">--</div>
+        <div id="limitTotalSubtle" class="text-xs text-slate-500 mt-0.5">--</div>
+      </div>
+      <div class="bg-amber-900/20 border border-amber-700/30 rounded-lg p-3">
+        <div class="text-xs text-amber-400">🔥 已用额度</div>
+        <div id="limitUsedAll" class="text-lg font-bold mono text-amber-300 mt-1">--</div>
+        <div id="limitUsedPctAll" class="text-xs text-slate-500 mt-0.5">--</div>
+      </div>
+      <div class="bg-emerald-900/20 border border-emerald-700/30 rounded-lg p-3">
+        <div class="text-xs text-emerald-400">💚 剩余可用</div>
+        <div id="limitRemAll" class="text-lg font-bold mono text-emerald-300 mt-1">--</div>
+        <div id="limitRemPctAll" class="text-xs text-slate-500 mt-0.5">--</div>
+      </div>
+      <div class="bg-purple-900/20 border border-purple-700/30 rounded-lg p-3">
+        <div class="text-xs text-purple-400">🎯 我的占比</div>
+        <div id="limitMyShare" class="text-lg font-bold mono text-purple-300 mt-1">--</div>
+        <div id="limitMyDetail" class="text-xs text-slate-500 mt-0.5">--</div>
+      </div>
+    </div>
+    <!-- 全市场使用率进度条 -->
+    <div class="mb-3">
+      <div class="bg-slate-900/40 rounded-full h-2 overflow-hidden">
+        <div id="limitGlobalBar" class="bg-gradient-to-r from-emerald-500 via-amber-400 to-red-500 h-full transition-all" style="width:0%"></div>
+      </div>
+      <div class="text-xs text-slate-500 mt-1 text-center" id="limitGlobalPctLabel">--</div>
+    </div>
     <div class="overflow-x-auto">
       <table class="w-full text-xs">
         <thead class="bg-slate-900/50 text-slate-400">
@@ -927,7 +958,55 @@ function renderLimitRank() {
 
   cntEl.textContent = rows.length;
 
-  // 排序
+  // ===== 全市场统计 =====
+  let allTotal = 0, allUsed = 0, allRem = 0;
+  let myTotal = 0, myUsed = 0, myRem = 0;
+  let myCount = 0;
+  for (const r of rows) {
+    allTotal += r.total;
+    allUsed += r.used;
+    allRem += r.remainder;
+    if (r.mine) {
+      myTotal += r.total;
+      myUsed += r.used;
+      myRem += r.remainder;
+      myCount++;
+    }
+  }
+  const allUsedPct = allTotal > 0 ? allUsed / allTotal * 100 : 0;
+  const allRemPct = 100 - allUsedPct;
+  const myShareTotal = allTotal > 0 ? myTotal / allTotal * 100 : 0;
+  const myUsedPct = myTotal > 0 ? myUsed / myTotal * 100 : 0;
+
+  const fmtBig = (n) => {
+    if (n >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
+    return '$' + n.toFixed(0);
+  };
+
+  const setText = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+  setText('limitTotalAll', fmtBig(allTotal));
+  setText('limitTotalSubtle', `${rows.length} 个用户`);
+  setText('limitUsedAll', fmtBig(allUsed));
+  setText('limitUsedPctAll', `占总额度 ${allUsedPct.toFixed(1)}%`);
+  setText('limitRemAll', fmtBig(allRem));
+  setText('limitRemPctAll', `占总额度 ${allRemPct.toFixed(1)}%`);
+
+  if (myCount > 0) {
+    setText('limitMyShare', myShareTotal.toFixed(2) + '%');
+    setText('limitMyDetail', `${myCount} 个地址 · 我的总 ${fmtBig(myTotal)} · 用 ${myUsedPct.toFixed(0)}%`);
+  } else {
+    setText('limitMyShare', '--');
+    setText('limitMyDetail', '我的地址未在范围内');
+  }
+
+  // 全市场进度条
+  const globalBar = document.getElementById('limitGlobalBar');
+  if (globalBar) globalBar.style.width = allUsedPct.toFixed(1) + '%';
+  setText('limitGlobalPctLabel', `🌍 全市场使用率 ${allUsedPct.toFixed(1)}%(已用 ${fmtBig(allUsed)} / 总 ${fmtBig(allTotal)})`);
+
+  // ===== 排序排行榜 =====
   const sortMode = document.getElementById('limitRankSort').value;
   rows.sort((a, b) => {
     switch (sortMode) {
