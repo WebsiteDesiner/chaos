@@ -376,6 +376,47 @@
     </div>
   </div>
 
+  <!-- 💎 用户额度排行榜 -->
+  <div class="bg-slate-800/60 rounded-xl p-5 mb-4">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <h3 class="text-sm font-semibold text-slate-300">
+        💎 用户额度排行榜
+        <span class="text-xs text-slate-500 font-normal ml-2">getCreateLimit() 实时数据 · 共 <span id="limitRankCount">--</span> 个用户</span>
+      </h3>
+      <div class="flex gap-3 items-center text-xs">
+        <span class="text-slate-400">排序:</span>
+        <select id="limitRankSort" class="bg-slate-700 rounded px-2 py-1 text-xs">
+          <option value="total_desc">总额度 ↓</option>
+          <option value="remainder_desc">剩余额度 ↓</option>
+          <option value="used_desc">已用额度 ↓</option>
+          <option value="usedpct_desc">使用率 ↓</option>
+          <option value="usedpct_asc">使用率 ↑</option>
+        </select>
+        <select id="limitRankPage" class="bg-slate-700 rounded px-2 py-1 text-xs">
+          <option value="20">Top 20</option>
+          <option value="50" selected>Top 50</option>
+          <option value="100">Top 100</option>
+          <option value="9999">全部</option>
+        </select>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs">
+        <thead class="bg-slate-900/50 text-slate-400">
+          <tr>
+            <th class="px-3 py-2 text-left">#</th>
+            <th class="px-3 py-2 text-left">地址</th>
+            <th class="px-3 py-2 text-right">总额度</th>
+            <th class="px-3 py-2 text-right">已用</th>
+            <th class="px-3 py-2 text-right">剩余</th>
+            <th class="px-3 py-2 text-left">使用率</th>
+          </tr>
+        </thead>
+        <tbody id="limitRankBody"></tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
 <div id="detailsSection" class="hidden">
@@ -789,22 +830,29 @@ function computePnlForAll() {
 //    用 multicall 一把梭,几秒搞定
 // ============================================================================
 async function scanCreateLimits() {
-  // 收集所有 Maker (从合约里提取 unique creators)
-  const makerSet = new Set();
+  // 收集所有用户 (creator + taker,因为 Taker 也可能开合约,我们也想看他们的额度)
+  // 同时把 myAddrs 加进去 (如果某地址没在合约里出现,也扫一下额度)
+  const userSet = new Set();
   for (const c of state.allContracts) {
-    makerSet.add(c.creator.toLowerCase());
+    userSet.add(c.creator.toLowerCase());
+    if (c.taker.toLowerCase() !== ZERO) userSet.add(c.taker.toLowerCase());
   }
-  const makers = [...makerSet];
-  if (makers.length === 0) return;
+  // 加上我的地址
+  const myAddrs = (document.getElementById('myAddrs').value || '')
+    .split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  for (const a of myAddrs) userSet.add(a);
 
-  dlog(`━━━ 扫描 ${makers.length} 个 Maker 的额度 ━━━`);
+  const users = [...userSet];
+  if (users.length === 0) return;
+
+  dlog(`━━━ 扫描 ${users.length} 个用户的额度 (Creator + Taker + 我的地址) ━━━`);
 
   state.createLimits = state.createLimits || {};
   const batchSize = 100;
   let okCnt = 0, errCnt = 0;
 
-  for (let off = 0; off < makers.length; off += batchSize) {
-    const batch = makers.slice(off, off + batchSize);
+  for (let off = 0; off < users.length; off += batchSize) {
+    const batch = users.slice(off, off + batchSize);
     const calls = batch.map(addr => ({
       target: PROXY,
       allowFailure: true,
@@ -833,11 +881,100 @@ async function scanCreateLimits() {
   dlog(`✓ 额度扫描完成: 成功 ${okCnt} / 失败 ${errCnt}`);
   state.createLimitsAt = Date.now();
 
+  // 缓存到 localStorage(下次打开瞬时加载)
+  try {
+    localStorage.setItem('chaos_create_limits', JSON.stringify({
+      data: state.createLimits,
+      at: state.createLimitsAt,
+    }));
+  } catch (e) {
+    dlog(`⚠️ 额度缓存失败: ${e.message}`);
+  }
+
   // 重新渲染面板(以包含额度数据)
   if (state.allContracts.length > 0) {
     dashboard();
     renderMyPnl();
+    render();         // 让详情表也带上额度小标签
+    renderLimitRank(); // 渲染排行榜
   }
+}
+
+// ============================================================================
+// 💎 用户额度排行榜
+// ============================================================================
+function renderLimitRank() {
+  const tbody = document.getElementById('limitRankBody');
+  const cntEl = document.getElementById('limitRankCount');
+  if (!tbody) return;
+
+  const limits = state.createLimits || {};
+  const myAddrs = (document.getElementById('myAddrs').value || '')
+    .split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const mySet = new Set(myAddrs);
+
+  // 把数据转成数组,过滤掉 total = 0 的(没意义)
+  const rows = Object.entries(limits)
+    .map(([addr, lim]) => ({
+      addr,
+      total: lim.total,
+      remainder: lim.remainder,
+      used: lim.total - lim.remainder,
+      usedPct: lim.total > 0 ? (lim.total - lim.remainder) / lim.total * 100 : 0,
+      mine: mySet.has(addr),
+    }))
+    .filter(r => r.total > 0);
+
+  cntEl.textContent = rows.length;
+
+  // 排序
+  const sortMode = document.getElementById('limitRankSort').value;
+  rows.sort((a, b) => {
+    switch (sortMode) {
+      case 'total_desc':     return b.total - a.total;
+      case 'remainder_desc': return b.remainder - a.remainder;
+      case 'used_desc':      return b.used - a.used;
+      case 'usedpct_desc':   return b.usedPct - a.usedPct;
+      case 'usedpct_asc':    return a.usedPct - b.usedPct;
+      default:               return b.total - a.total;
+    }
+  });
+
+  // 限定数量
+  const pageSize = parseInt(document.getElementById('limitRankPage').value);
+  const display = rows.slice(0, pageSize);
+
+  if (display.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center p-6 text-slate-500">暂无数据 — 等额度扫描完成或点 ↻ 刷新</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = display.map((r, i) => {
+    const pctColor = r.usedPct > 80 ? 'bg-red-500'
+                   : r.usedPct > 50 ? 'bg-amber-500'
+                   : 'bg-emerald-500';
+    const rowCls = r.mine ? 'bg-purple-900/20 hover:bg-purple-900/40' : 'hover:bg-slate-800/30';
+    const mineBadge = r.mine ? '<span class="ml-2 px-1 py-0.5 rounded bg-purple-600/40 text-purple-200 text-xs">我</span>' : '';
+    return `
+      <tr class="border-t border-slate-700/40 ${rowCls}">
+        <td class="px-3 py-1.5 text-slate-500">${i + 1}</td>
+        <td class="px-3 py-1.5">
+          <a href="https://bscscan.com/address/${r.addr}" target="_blank" class="mono text-purple-400 hover:underline">${shortAddr(r.addr)}</a>${mineBadge}
+        </td>
+        <td class="px-3 py-1.5 text-right mono text-slate-200">$${r.total.toFixed(0)}</td>
+        <td class="px-3 py-1.5 text-right mono text-amber-300">$${r.used.toFixed(0)}</td>
+        <td class="px-3 py-1.5 text-right mono text-emerald-300">$${r.remainder.toFixed(0)}</td>
+        <td class="px-3 py-1.5">
+          <div class="flex items-center gap-2">
+            <div class="bg-slate-700 rounded-full h-2 w-24 overflow-hidden">
+              <div class="${pctColor} h-full" style="width:${r.usedPct.toFixed(1)}%"></div>
+            </div>
+            <span class="mono text-xs text-slate-400 w-12">${r.usedPct.toFixed(1)}%</span>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
 }
 
 // ============================================================================
@@ -1498,6 +1635,16 @@ function loadRealPnlCache() {
       dlog(`💾 已加载缓存的真实利润数据(同步于 ${new Date(cache.syncedAt).toLocaleString('zh-CN')})`);
     }
   } catch {}
+
+  try {
+    const limCache = JSON.parse(localStorage.getItem('chaos_create_limits') || 'null');
+    if (limCache && limCache.data) {
+      state.createLimits = limCache.data;
+      state.createLimitsAt = limCache.at;
+      const ago = Math.round((Date.now() - limCache.at) / 60000);
+      dlog(`💾 已加载缓存的额度数据 (${Object.keys(limCache.data).length} 用户,${ago < 1 ? '刚刚' : ago + '分钟前'}查询)`);
+    }
+  } catch {}
 }
 
 // ============================================================================
@@ -1880,6 +2027,23 @@ function render() {
     const creatorCls = creatorMine ? 'text-sky-300 font-bold' : 'hover:text-purple-400';
     const takerCls   = takerMine   ? 'text-amber-300 font-bold' : 'hover:text-purple-400';
 
+    // ★ 额度小标签 (Creator + Taker 各一个)
+    const fmtLimitTag = (addr) => {
+      if (!state.createLimits) return '';
+      const lim = state.createLimits[addr.toLowerCase()];
+      if (!lim) return '';
+      const pct = lim.total > 0 ? Math.round((lim.total - lim.remainder) / lim.total * 100) : 0;
+      let color = 'text-emerald-400';
+      if (pct > 80) color = 'text-red-400';
+      else if (pct > 50) color = 'text-amber-300';
+      // 简短显示:>=1000 用 K,否则原数
+      const remStr = lim.remainder >= 1000 ? (lim.remainder/1000).toFixed(1) + 'K' : lim.remainder.toFixed(0);
+      const totStr = lim.total >= 1000 ? (lim.total/1000).toFixed(1) + 'K' : lim.total.toFixed(0);
+      return `<div class="text-xs ${color} mono mt-0.5" title="总额度 $${lim.total.toFixed(0)} · 已用 ${pct}% · 剩 $${lim.remainder.toFixed(0)}">剩 $${remStr}/$${totStr}</div>`;
+    };
+    const creatorLimitTag = fmtLimitTag(c.creator);
+    const takerLimitTag = isUnfilled ? '' : fmtLimitTag(c.taker);
+
     // ★ 盈亏 + 我的净盈亏(扣手续费)
     let priceDiffStr, pnlStr, myNetStr;
     if (isUnfilled) {
@@ -1945,8 +2109,8 @@ function render() {
         <td class="px-3 py-2 mono">#${c.id}</td>
         <td class="px-3 py-2">${statusBadge}</td>
         <td class="px-3 py-2 text-center">${roleBadge}</td>
-        <td class="px-3 py-2"><a href="https://bscscan.com/address/${c.creator}" target="_blank" class="mono ${creatorCls}">${shortAddr(c.creator)}</a></td>
-        <td class="px-3 py-2">${isUnfilled ? '<span class="text-slate-500">—</span>' : `<a href="https://bscscan.com/address/${c.taker}" target="_blank" class="mono ${takerCls}">${shortAddr(c.taker)}</a>`}</td>
+        <td class="px-3 py-2"><a href="https://bscscan.com/address/${c.creator}" target="_blank" class="mono ${creatorCls}">${shortAddr(c.creator)}</a>${creatorLimitTag}</td>
+        <td class="px-3 py-2">${isUnfilled ? '<span class="text-slate-500">—</span>' : `<a href="https://bscscan.com/address/${c.taker}" target="_blank" class="mono ${takerCls}">${shortAddr(c.taker)}</a>${takerLimitTag}`}</td>
         <td class="px-3 py-2 text-right mono">$${fmt(c.usdt)}</td>
         <td class="px-3 py-2 text-right mono text-slate-400">${isUnfilled?'—':fmt(c.tokenAmount)}</td>
         <td class="px-3 py-2 text-right mono">${isUnfilled?'—':'$'+fmt(c.lockPrice,6)}</td>
@@ -1983,11 +2147,17 @@ document.getElementById('syncRealBtn').addEventListener('click', syncRealPnl);
   document.getElementById(id).addEventListener('input', render);
 });
 
+// 排行榜排序/分页
+['limitRankSort','limitRankPage'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', renderLimitRank);
+});
+
 // 启动:加载缓存
 loadRealPnlCache();
-loadCreateLimitsCache();
-// 启动时渲染快照
+// 启动时渲染快照 + 排行榜
 renderSnapshots();
+renderLimitRank();
 
 // 公开版: 不预填地址
 const MY_ADDRESSES = "";
