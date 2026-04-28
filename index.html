@@ -144,6 +144,10 @@
       </h3>
       <div class="flex gap-5 items-end flex-wrap">
         <div class="text-right">
+          <div class="text-xs text-slate-400">📊 我的剩余额度</div>
+          <div id="myHdrLimit" class="mono text-purple-300 text-lg font-bold" title="所有我的地址加起来还能创建多少 USDT 的合约">--</div>
+        </div>
+        <div class="text-right">
           <div class="text-xs text-slate-400">🔒 锁在合约里</div>
           <div id="myHdrLocked" class="mono text-cyan-300 text-lg font-bold">--</div>
         </div>
@@ -239,7 +243,13 @@
 
     <!-- 💵 已实现明细(每个地址的真实利润 breakdown)-->
     <details id="realizedPanel" class="mt-3 pt-3 border-t border-slate-700/50 hidden" open>
-      <summary class="cursor-pointer text-xs text-amber-300 font-semibold hover:text-amber-200">💵 已实现 USDT 明细 — 按地址 (<span id="realizedCount">0</span>)</summary>
+      <summary class="cursor-pointer text-xs text-amber-300 font-semibold hover:text-amber-200 flex items-center gap-2 flex-wrap">
+        💵 已实现 USDT 明细 — 按地址 (<span id="realizedCount">0</span>)
+        <button id="limitBtn" type="button" class="ml-2 px-2 py-0.5 bg-cyan-700/50 hover:bg-cyan-600/60 rounded text-cyan-200 text-xs font-medium" title="查询每个地址当前剩余的创建合约额度(链上 getCreateLimit 接口)" onclick="event.preventDefault(); event.stopPropagation(); fetchCreateLimits();">
+          📊 查额度
+        </button>
+        <span id="limitTimeHint" class="text-slate-500 text-xs font-normal"></span>
+      </summary>
       <div class="mt-2 overflow-x-auto">
         <table class="w-full text-xs">
           <thead class="bg-slate-900/50 text-slate-400">
@@ -248,6 +258,7 @@
               <th class="px-3 py-2 text-right">投入合约</th>
               <th class="px-3 py-2 text-right">合约退还</th>
               <th class="px-3 py-2 text-right">已实现 净 USDT</th>
+              <th class="px-3 py-2 text-right" title="getCreateLimit() 返回的 total / remainder">总额度 / 剩余</th>
               <th class="px-3 py-2 text-right">交易笔数</th>
             </tr>
           </thead>
@@ -356,7 +367,7 @@
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
     <div class="bg-slate-800/60 rounded-xl p-5">
-      <h3 class="text-sm font-semibold text-slate-300 mb-3">🏆 Top 10 Maker(按活跃金额)</h3>
+      <h3 class="text-sm font-semibold text-slate-300 mb-3">🏆 Top 10 Maker(按活跃金额)<span class="text-xs text-slate-500 font-normal ml-2">· 含剩余创建额度</span></h3>
       <div id="topMakers" class="space-y-2 text-sm"></div>
     </div>
     <div class="bg-slate-800/60 rounded-xl p-5">
@@ -497,6 +508,7 @@ const CHAOS_ABI = [
   "function nextContractId() view returns (uint256)",
   "function token() view returns (address)",
   "function pair() view returns (address)",
+  "function getCreateLimit(address user) view returns (uint256 total, uint256 remainder)",
 ];
 const PAIR_ABI = [
   "function getReserves() view returns (uint112, uint112, uint32)",
@@ -725,6 +737,9 @@ async function refresh() {
     // ★ 扫完立即算一次 _pnlBps,存到每条合约上,render 只读不算
     computePnlForAll();
 
+    // ★ 异步扫描所有 Maker 的 createLimit (后台跑,不阻塞 UI)
+    scanCreateLimits().catch(e => dlog(`⚠️ 额度扫描失败: ${e.message}`));
+
     dashboard();
     render();
     setSync("bg-green-500", `同步完成 ${new Date().toLocaleTimeString('zh-CN')}`);
@@ -767,6 +782,62 @@ function computePnlForAll() {
   }
   dlog(`盈亏统计: 有效 ${nonNull},无 taker ${noTaker},无 lockPrice ${noLockPrice},无当前价 ${noCurPrice},其他 ${other}`);
   if (noCurPrice > 0) dlog(`⚠️ ${noCurPrice} 条无法计算因为当前价未读到,检查 pair/token 配置`);
+}
+
+// ============================================================================
+// 📊 扫描所有 Maker 的 createLimit (额度信息)
+//    用 multicall 一把梭,几秒搞定
+// ============================================================================
+async function scanCreateLimits() {
+  // 收集所有 Maker (从合约里提取 unique creators)
+  const makerSet = new Set();
+  for (const c of state.allContracts) {
+    makerSet.add(c.creator.toLowerCase());
+  }
+  const makers = [...makerSet];
+  if (makers.length === 0) return;
+
+  dlog(`━━━ 扫描 ${makers.length} 个 Maker 的额度 ━━━`);
+
+  state.createLimits = state.createLimits || {};
+  const batchSize = 100;
+  let okCnt = 0, errCnt = 0;
+
+  for (let off = 0; off < makers.length; off += batchSize) {
+    const batch = makers.slice(off, off + batchSize);
+    const calls = batch.map(addr => ({
+      target: PROXY,
+      allowFailure: true,
+      callData: chaosIface.encodeFunctionData("getCreateLimit", [addr]),
+    }));
+
+    try {
+      const res = await multicall.aggregate3.staticCall(calls);
+      for (let i = 0; i < res.length; i++) {
+        if (!res[i].success) { errCnt++; continue; }
+        try {
+          const d = chaosIface.decodeFunctionResult("getCreateLimit", res[i].returnData);
+          state.createLimits[batch[i]] = {
+            total: Number(ethers.formatUnits(d[0], 18)),
+            remainder: Number(ethers.formatUnits(d[1], 18)),
+          };
+          okCnt++;
+        } catch { errCnt++; }
+      }
+    } catch (e) {
+      errCnt += batch.length;
+      dlog(`  额度扫描批次失败: ${e.message.slice(0, 60)}`);
+    }
+  }
+
+  dlog(`✓ 额度扫描完成: 成功 ${okCnt} / 失败 ${errCnt}`);
+  state.createLimitsAt = Date.now();
+
+  // 重新渲染面板(以包含额度数据)
+  if (state.allContracts.length > 0) {
+    dashboard();
+    renderMyPnl();
+  }
 }
 
 // ============================================================================
@@ -986,6 +1057,31 @@ function renderMyPnl() {
   set('myHdrFee', '-' + fmtUsd(grandFee), 'mono text-red-400 text-lg font-bold');
   set('myHdrLocked', '$' + grandPrincipalActive.toFixed(2), 'mono text-cyan-300 text-lg font-bold');
 
+  // ★ 我的总额度 (来自 scanCreateLimits)
+  const limitEl = document.getElementById('myHdrLimit');
+  if (limitEl && state.createLimits) {
+    let totalRemainder = 0, totalLimit = 0, hasAny = false;
+    for (const a of myAddrs) {
+      const lim = state.createLimits[a.toLowerCase()];
+      if (lim) {
+        totalRemainder += lim.remainder;
+        totalLimit += lim.total;
+        hasAny = true;
+      }
+    }
+    if (hasAny) {
+      const usedN = totalLimit - totalRemainder;
+      const pct = totalLimit > 0 ? Math.round(usedN / totalLimit * 100) : 0;
+      limitEl.textContent = '$' + totalRemainder.toFixed(0);
+      limitEl.title = `总额度 $${totalLimit.toFixed(0)} · 已用 $${usedN.toFixed(0)} (${pct}%) · 剩 $${totalRemainder.toFixed(0)}`;
+      limitEl.className = 'mono text-lg font-bold ' +
+        (pct > 80 ? 'text-red-400' : pct > 50 ? 'text-amber-300' : 'text-purple-300');
+    } else {
+      limitEl.textContent = '--';
+      limitEl.className = 'mono text-slate-500 text-lg font-bold';
+    }
+  }
+
   // ★ 已实现 USDT (来自合约流水扫描)
   let realizedTotal = 0;
   let hasRealizedData = false;
@@ -1100,9 +1196,45 @@ function renderRealizedTable(myAddrs) {
   countEl.textContent = rows.length;
   panel.classList.remove('hidden');
 
+  // 显示额度查询时间提示
+  const limitHint = document.getElementById('limitTimeHint');
+  if (limitHint) {
+    if (state.createLimitsAt) {
+      const ago = Math.round((Date.now() - state.createLimitsAt) / 60000);
+      limitHint.textContent = `· 额度 ${ago < 1 ? '刚刚' : ago + '分钟前'}查询`;
+    } else {
+      limitHint.textContent = '';
+    }
+  }
+
+  const limits = state.createLimits || {};
+  const fmtLimit = (l) => {
+    if (!l || l.error) return '<span class="text-slate-600">—</span>';
+    const tot = l.total.toFixed(0);
+    const rem = l.remainder.toFixed(0);
+    const pct = l.total > 0 ? (l.remainder / l.total * 100) : 0;
+    let color = 'text-slate-300';
+    if (pct > 50) color = 'text-green-400';
+    else if (pct > 20) color = 'text-amber-400';
+    else if (pct > 0) color = 'text-orange-400';
+    else color = 'text-red-500';
+    return `<span class="${color}" title="总额度 $${tot} / 剩余 $${rem} (${pct.toFixed(1)}%)">$${rem}/$${tot}</span>`;
+  };
+
+  let totalLimit = 0, totalRem = 0, hasLimit = false;
+  for (const r of rows) {
+    const l = limits[r.addr.toLowerCase()];
+    if (l && !l.error) {
+      totalLimit += l.total;
+      totalRem += l.remainder;
+      hasLimit = true;
+    }
+  }
+
   tbody.innerHTML = rows.map(r => {
     const netColor = r.net > 0 ? 'text-green-400' : r.net < 0 ? 'text-red-400' : 'text-slate-500';
     const noDataMark = r.noData ? '<span class="text-slate-600 ml-1" title="未发现 USDT 流水">·</span>' : '';
+    const limitCell = fmtLimit(limits[r.addr.toLowerCase()]);
     return `
       <tr class="border-t border-slate-700/40 hover:bg-slate-800/30">
         <td class="px-3 py-1.5">
@@ -1111,6 +1243,7 @@ function renderRealizedTable(myAddrs) {
         <td class="px-3 py-1.5 text-right mono text-red-300" title="向合约转入 USDT (创建/接受合约)">-$${r.out.toFixed(2)}</td>
         <td class="px-3 py-1.5 text-right mono text-green-300" title="合约转出 USDT (平仓/取消)">+$${r.in.toFixed(2)}</td>
         <td class="px-3 py-1.5 text-right mono font-bold ${netColor}">${r.net >= 0 ? '+' : ''}$${r.net.toFixed(2)}</td>
+        <td class="px-3 py-1.5 text-right mono">${limitCell}</td>
         <td class="px-3 py-1.5 text-right mono text-slate-500 text-xs">${r.txInCnt} 入 / ${r.txOutCnt} 出</td>
       </tr>
     `;
@@ -1120,6 +1253,7 @@ function renderRealizedTable(myAddrs) {
       <td class="px-3 py-2 text-right mono text-red-400">-$${totalOut.toFixed(2)}</td>
       <td class="px-3 py-2 text-right mono text-green-400">+$${totalIn.toFixed(2)}</td>
       <td class="px-3 py-2 text-right mono ${totalNet >= 0 ? 'text-green-400' : 'text-red-400'}">${totalNet >= 0 ? '+' : ''}$${totalNet.toFixed(2)}</td>
+      <td class="px-3 py-2 text-right mono ${hasLimit ? 'text-cyan-400' : 'text-slate-600'}">${hasLimit ? `$${totalRem.toFixed(0)}/$${totalLimit.toFixed(0)}` : '—'}</td>
       <td class="px-3 py-2 text-right mono text-slate-500 text-xs">${totalIntx} / ${totalOuttx}</td>
     </tr>
   `;
@@ -1366,6 +1500,78 @@ function loadRealPnlCache() {
   } catch {}
 }
 
+// ============================================================================
+// 📊 批量查询创建额度 — getCreateLimit(address) → (total, remainder)
+// 用 multicall 一次性查所有 myAddrs,自动渲染到明细表
+// ============================================================================
+async function fetchCreateLimits() {
+  if (!provider || !chaos || !multicall) {
+    dlog("⚠️ 请先点'刷新'初始化 provider");
+    return;
+  }
+  const myAddrs = (document.getElementById('myAddrs').value || '')
+    .split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+  if (myAddrs.length === 0) return;
+
+  const btn = document.getElementById('limitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 查询中…'; }
+
+  try {
+    // 用 multicall 批量查
+    const calls = myAddrs.map(a => ({
+      target: PROXY,
+      allowFailure: true,
+      callData: chaosIface.encodeFunctionData("getCreateLimit", [a]),
+    }));
+    const res = await multicall.aggregate3.staticCall(calls);
+
+    const limits = {};  // 小写地址 → { total, remainder }
+    for (let i = 0; i < res.length; i++) {
+      const lower = myAddrs[i].toLowerCase();
+      if (!res[i].success) {
+        limits[lower] = { error: true };
+        continue;
+      }
+      try {
+        const [total, remainder] = chaosIface.decodeFunctionResult("getCreateLimit", res[i].returnData);
+        limits[lower] = {
+          total: Number(ethers.formatUnits(total, 18)),
+          remainder: Number(ethers.formatUnits(remainder, 18)),
+        };
+      } catch (e) {
+        limits[lower] = { error: true, msg: e.message };
+      }
+    }
+
+    state.createLimits = limits;
+    state.createLimitsAt = Date.now();
+
+    // 缓存到 localStorage(数据小,可常驻)
+    try {
+      localStorage.setItem('chaos_create_limits', JSON.stringify({
+        data: limits, time: state.createLimitsAt
+      }));
+    } catch {}
+
+    dlog(`✓ 创建额度: 查询 ${myAddrs.length} 个地址`);
+    renderRealizedTable(myAddrs);  // 重新渲染明细表
+  } catch (e) {
+    dlog(`❌ 查询额度失败: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📊 查额度'; }
+  }
+}
+
+function loadCreateLimitsCache() {
+  try {
+    const cache = JSON.parse(localStorage.getItem('chaos_create_limits') || 'null');
+    if (cache && cache.data) {
+      state.createLimits = cache.data;
+      state.createLimitsAt = cache.time;
+    }
+  } catch {}
+}
+
 function takeSnapshot() {
   if (!state.myPnlSummary) {
     alert('请先扫描完成再保存快照');
@@ -1499,7 +1705,17 @@ function renderTopUsers(active, filled) {
   }
   const topTakers = Object.values(takerMap).sort((a,b) => b.amount - a.amount).slice(0, 10);
 
-  const renderRow = (u, i) => `
+  const renderRow = (u, i, showLimit) => {
+    let limitStr = '';
+    if (showLimit && state.createLimits) {
+      const lim = state.createLimits[u.addr.toLowerCase()];
+      if (lim) {
+        const pct = lim.total > 0 ? Math.round((lim.total - lim.remainder) / lim.total * 100) : 0;
+        const color = pct > 80 ? 'text-red-400' : pct > 50 ? 'text-amber-300' : 'text-emerald-400';
+        limitStr = `<span class="${color} ml-2 text-xs" title="总 $${lim.total.toFixed(0)} · 已用 ${pct}%">剩 $${lim.remainder.toFixed(0)}</span>`;
+      }
+    }
+    return `
     <div class="flex justify-between items-center py-1.5 border-b border-slate-700/30 last:border-0">
       <div class="flex items-center gap-2">
         <span class="text-slate-500 text-xs w-6">${i + 1}.</span>
@@ -1508,15 +1724,17 @@ function renderTopUsers(active, filled) {
       <div class="text-right text-xs">
         <span class="font-semibold mono">${fmtUsd(u.amount)}</span>
         <span class="text-slate-500 ml-2">${u.count} 单</span>
+        ${limitStr}
       </div>
     </div>
   `;
+  };
 
   document.getElementById('topMakers').innerHTML = topMakers.length > 0
-    ? topMakers.map(renderRow).join('')
+    ? topMakers.map((u, i) => renderRow(u, i, true)).join('')
     : '<div class="text-slate-500">暂无数据</div>';
   document.getElementById('topTakers').innerHTML = topTakers.length > 0
-    ? topTakers.map(renderRow).join('')
+    ? topTakers.map((u, i) => renderRow(u, i, false)).join('')
     : '<div class="text-slate-500">暂无数据</div>';
 }
 
@@ -1765,8 +1983,9 @@ document.getElementById('syncRealBtn').addEventListener('click', syncRealPnl);
   document.getElementById(id).addEventListener('input', render);
 });
 
-// 启动:加载缓存的真实利润数据
+// 启动:加载缓存
 loadRealPnlCache();
+loadCreateLimitsCache();
 // 启动时渲染快照
 renderSnapshots();
 
