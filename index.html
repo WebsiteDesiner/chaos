@@ -1098,8 +1098,9 @@ function dashboard() {
     if (c._pnlBps === null) return;
     const bps = c._pnlBps;
     const usdt = Number(ethers.formatUnits(c.usdt, 18));
+    // G = P × 2 × bps (合约总盈亏),溢出 ±P 归 LP(各扣 5% 手续费后给双方保证金)
     const rawPnl = usdt * 2 * bps / 10000;
-    const pnl = Math.max(-usdt, Math.min(usdt, rawPnl));  // ★ G 上限 ±P (溢出归 LP)
+    const pnl = Math.max(-usdt, Math.min(usdt, rawPnl));
     pnlList.push({ contract: c, bps, pnl });
     totalPnlPct += bps;
     if (pnl > 0) { winCnt++; winAmt += pnl; }
@@ -1170,28 +1171,33 @@ function renderMyPnl() {
     const isClosed = !c.isActive;
     const bps = c._pnlBps;
     const principal = Number(ethers.formatUnits(c.usdt, 18));
+    // G = P × 2 × bps (合约总盈亏),双方各得 G/2(实 USDT)
     const rawG = principal * 2 * bps / 10000;
-    // ★ G 上限 ±P:涨跌 > 50% 时,超出部分溢出到 LP 池(保证金升值),双方实际只能拿 ±P
+    // 溢出 ±P 归 LP(各扣 5% 后到双方保证金)
     const grossPnl = Math.max(-principal, Math.min(principal, rawG));
     const myShare = grossPnl / 2;
 
     let usdtPnl, marginFee, principalUsed, bucket;
     if (creatorMine && takerMine) {
+      // M+T 自接:双方都你 → 拿全部 G(各 G/2 加起来)
       bucket = b.both;
-      usdtPnl = grossPnl;       // 整 G 都到 USDT
-      marginFee = Math.max(0, principal + myShare) * FEE_RATE;  // Taker 端扣一次
+      usdtPnl = grossPnl;
+      // Taker 那边 5% 手续费扣保证金
+      marginFee = Math.max(0, principal + myShare) * 0.05;
       principalUsed = principal * 2;
       countBoth++;
     } else if (creatorMine) {
+      // Maker:拿 G/2,无手续费
       bucket = b.maker;
       usdtPnl = myShare;
       marginFee = 0;
       principalUsed = principal;
       countMaker++;
     } else {
+      // Taker:拿 G/2,但要扣 5% 保证金手续费
       bucket = b.taker;
       usdtPnl = myShare;
-      marginFee = Math.max(0, principal + myShare) * FEE_RATE;
+      marginFee = Math.max(0, principal + myShare) * 0.05;
       principalUsed = principal;
       countTaker++;
     }
@@ -2139,30 +2145,36 @@ function render() {
       const bps = c._pnlBps;
       const color = bps >= 0 ? 'text-green-400' : 'text-red-400';
       const suffix = isClosed ? '<span class="text-slate-500 text-xs ml-1" title="假设持有至今">*</span>' : '';
-      priceDiffStr = `<span class="${color}">${bps>=0?'+':''}${(bps/100).toFixed(2)}%${suffix}</span>`;
-      const principal = Number(ethers.formatUnits(c.usdt, 18));
-      const rawG = principal * 2 * bps / 10000;
-      // ★ G 上限 ±P (涨跌>50% 时溢出归 LP)
-      const grossPnl = Math.max(-principal, Math.min(principal, rawG));
-      const overflow = Math.abs(rawG) > principal;
-      const overflowMark = overflow ? '<span class="text-purple-400 text-xs ml-1" title="超出 P,溢出归 LP 池">⤴</span>' : '';
-      pnlStr = `<span class="${color}">${grossPnl>=0?'+':''}$${grossPnl.toFixed(2)}${overflowMark}${suffix}</span>`;
+      // 价差% — 跟官网一致显示单方价差 (bps/2)
+      const sideBps = bps / 2;
+      priceDiffStr = `<span class="${color}">${sideBps>=0?'+':''}${(sideBps/100).toFixed(2)}%${suffix}</span>`;
 
-      // 我的净 — 根据角色算扣完手续费的实际盈亏
-      const myShare = grossPnl / 2;
+      const principal = Number(ethers.formatUnits(c.usdt, 18));
+      // 单方盈亏 G/2:Maker 和 Taker 都拿这个数(同向,合作关系)
+      // P × bps 已经等于 G/2 (因为 G = P × 2 × bps)
+      const rawSide = principal * bps / 10000;
+      const sidePnl = Math.max(-principal, Math.min(principal, rawSide));
+      const overflow = Math.abs(rawSide) > principal;
+      const overflowMark = overflow ? '<span class="text-purple-400 text-xs ml-1" title="单方涨跌超 100% 即合约 G > P,溢出归 LP">⤴</span>' : '';
+      pnlStr = `<span class="${color}">${sidePnl>=0?'+':''}$${sidePnl.toFixed(2)}${overflowMark}${suffix}</span>`;
+
+      // 我的净 — Maker 和 Taker 都拿 sidePnl,但 Taker 多扣 5% 保证金税
       const FEE_RATE = 0.05;
       let myNet, hint;
       if (creatorMine && takerMine) {
-        const fee = Math.max(0, principal + myShare) * FEE_RATE;
-        myNet = grossPnl - fee;
-        hint = `M+T: G - 费 = ${grossPnl.toFixed(2)} - ${fee.toFixed(2)}`;
+        // M+T 自接:两边都你 → 拿 G(2×sidePnl),Taker 那侧扣一次费
+        const fee = Math.max(0, principal + sidePnl) * FEE_RATE;
+        myNet = sidePnl * 2 - fee;
+        hint = `M+T: G=${(sidePnl*2).toFixed(2)} - 费 ${fee.toFixed(2)}`;
       } else if (creatorMine) {
-        myNet = myShare;
-        hint = `Maker: G/2 = ${myShare.toFixed(2)}(无费)`;
+        // Maker:G/2,无费
+        myNet = sidePnl;
+        hint = `Maker: G/2 = ${sidePnl.toFixed(2)}(无费)`;
       } else if (takerMine) {
-        const fee = Math.max(0, principal + myShare) * FEE_RATE;
-        myNet = myShare - fee;
-        hint = `Taker: G/2 - 费 = ${myShare.toFixed(2)} - ${fee.toFixed(2)}`;
+        // Taker:G/2,扣 5% 保证金税
+        const fee = Math.max(0, principal + sidePnl) * FEE_RATE;
+        myNet = sidePnl - fee;
+        hint = `Taker: ${sidePnl.toFixed(2)} - 费 ${fee.toFixed(2)}`;
       } else {
         myNet = null;
       }
