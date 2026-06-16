@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>太初 Chaos Monitor - 公开版</title>
+<title>太初 Chaos Monitor - 全市场统计</title>
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
@@ -36,10 +36,9 @@
 
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <div>
-    <h1 class="text-2xl font-bold">🔥 太初 Chaos Monitor <span class="text-xs px-2 py-0.5 bg-purple-600/40 rounded text-purple-200 align-middle ml-1">公开版</span></h1>
+    <h1 class="text-2xl font-bold">🔥 太初 Chaos Monitor</h1>
     <p class="text-sm text-slate-400 mt-1">
       链上实时数据 · <a class="text-purple-400 hover:underline mono" href="https://bscscan.com/address/0xA2B33aeAbc1870A855a1Cdd51db4e37f642c8487" target="_blank">0xA2B3…C8487</a>
-      · <span class="text-yellow-400">在下方填入你的钱包地址,自动保存</span>
     </p>
   </div>
   <div class="flex items-center gap-3">
@@ -67,12 +66,13 @@
     <label class="text-xs text-slate-400 block mb-1">快速切换</label>
     <select id="rpcPreset" class="bg-slate-700 rounded px-3 py-1.5 text-sm">
       <option value="">---</option>
+      <option value="https://bsc.drpc.org">dRPC 公共(默认)</option>
       <option value="https://bsc-dataseed.binance.org">Binance 官方</option>
       <option value="https://bsc-dataseed1.defibit.io">DefiBit</option>
       <option value="https://bsc-dataseed1.ninicoin.io">NiniCoin</option>
       <option value="https://rpc.ankr.com/bsc">Ankr 公共</option>
       <option value="https://binance.llamarpc.com">Llama</option>
-      <option value="https://bsc.drpc.org">dRPC</option>
+      <option value="https://lb.drpc.live/bsc/AhFFc_foCERVuckrokH_kjlQCkQrR94R8Z7UtiKh6MJI">dRPC 私人(更快)</option>
     </select>
   </div>
   <div>
@@ -146,6 +146,10 @@
         <div class="text-right">
           <div class="text-xs text-slate-400">📊 我的剩余额度</div>
           <div id="myHdrLimit" class="mono text-purple-300 text-lg font-bold" title="所有我的地址加起来还能创建多少 USDT 的合约">--</div>
+        </div>
+        <div class="text-right">
+          <div class="text-xs text-slate-400">💎 我的总保证金</div>
+          <div id="myHdrMargin" class="mono text-fuchsia-300 text-lg font-bold" title="所有我的地址的可用保证金合计 (LP 单边 USDT,等于能拿出来接 Taker 的总金额)">--</div>
         </div>
         <div class="text-right">
           <div class="text-xs text-slate-400">🔒 锁在合约里</div>
@@ -390,6 +394,7 @@
           <option value="total_desc">总额度 ↓</option>
           <option value="remainder_desc">剩余额度 ↓</option>
           <option value="used_desc">已用额度 ↓</option>
+          <option value="margin_desc">可用保证金 ↓</option>
           <option value="usedpct_desc">使用率 ↓</option>
           <option value="usedpct_asc">使用率 ↑</option>
         </select>
@@ -403,7 +408,7 @@
     </div>
 
     <!-- 📊 全市场总览统计 -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
       <div class="bg-slate-900/40 rounded-lg p-3">
         <div class="text-xs text-slate-400">📦 全市场总额度</div>
         <div id="limitTotalAll" class="text-lg font-bold mono text-slate-200 mt-1">--</div>
@@ -418,6 +423,11 @@
         <div class="text-xs text-emerald-400">💚 剩余可用</div>
         <div id="limitRemAll" class="text-lg font-bold mono text-emerald-300 mt-1">--</div>
         <div id="limitRemPctAll" class="text-xs text-slate-500 mt-0.5">--</div>
+      </div>
+      <div class="bg-fuchsia-900/20 border border-fuchsia-700/30 rounded-lg p-3" title="LP 单边 USDT,全市场能接 Taker 的总钱">
+        <div class="text-xs text-fuchsia-400">💎 可用保证金合计</div>
+        <div id="limitMarginAll" class="text-lg font-bold mono text-fuchsia-300 mt-1">--</div>
+        <div id="limitMarginSubtle" class="text-xs text-slate-500 mt-0.5">LP 折单边 USDT</div>
       </div>
       <div class="bg-purple-900/20 border border-purple-700/30 rounded-lg p-3">
         <div class="text-xs text-purple-400">🎯 我的占比</div>
@@ -450,6 +460,7 @@
             <th class="px-3 py-2 text-right">总额度</th>
             <th class="px-3 py-2 text-right">已用</th>
             <th class="px-3 py-2 text-right">剩余</th>
+            <th class="px-3 py-2 text-right" title="LP 单边 USDT,代表能拿来做 Taker 的金额">可用保证金</th>
             <th class="px-3 py-2 text-left">使用率</th>
           </tr>
         </thead>
@@ -514,15 +525,15 @@
     <label class="text-xs text-slate-400 block mb-1 flex items-center justify-between">
       <span>🎯 高亮我的地址</span>
       <span class="flex items-center gap-3">
-        <button id="resetAddrsBtn" type="button" class="text-xs text-red-400 hover:text-red-300 underline font-normal">
-          🗑 清空地址
+        <button id="resetAddrsBtn" type="button" class="text-xs text-purple-400 hover:text-purple-300 underline font-normal">
+          ✕ 清空地址
         </button>
         <span id="myAddrCount" class="text-xs text-purple-400 font-normal"></span>
       </span>
     </label>
-    <textarea id="myAddrs" rows="4" placeholder="🎯 在这里粘贴你的钱包地址,一行一个,自动保存&#10;0xaaa...&#10;0xbbb..."
+    <textarea id="myAddrs" rows="3" placeholder="一行一个地址,粘贴即可&#10;0xaaa...&#10;0xbbb..."
            class="bg-slate-700 rounded px-3 py-2 text-sm w-full mono resize-y"></textarea>
-    <p class="text-xs text-slate-500 mt-1">💾 自动保存到浏览器,换浏览器/清缓存会丢</p>
+    <p class="text-xs text-slate-500 mt-1">💾 自动保存 · 想查别人清空输入即可</p>
   </div>
 
   <div class="bg-slate-800/60 rounded-xl overflow-hidden">
@@ -580,17 +591,28 @@ const USDT       = "0x55d398326f99059fF775485246999027B3197955";
 const TRANSFER_SIG = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const ZERO       = "0x0000000000000000000000000000000000000000";
 
+// ContractInfo struct (与合约源码一致)
+const CONTRACT_INFO_TUPLE =
+  "tuple(address creator, address taker, uint256 usdtAmount, uint256 lpAmount, uint256 tokenAmount, uint256 benchmark, uint256 lockedPrice, uint256 createdTime, uint256 lockedUntil, bool isActive, bool isCompleted, int256 settledPnl)";
+
 const CHAOS_ABI = [
+  // ★ 老的 12-字段平铺签名,settledPnl 改为 int256 (亏损不再爆数字)
   `function getContract(uint256 num) view returns (
      address, address, uint256, uint256,
      uint256, uint256, uint256,
      uint256, uint256,
-     bool, bool, uint256
+     bool, bool, int256
    )`,
   "function nextContractId() view returns (uint256)",
   "function token() view returns (address)",
   "function pair() view returns (address)",
   "function getCreateLimit(address user) view returns (uint256 total, uint256 remainder)",
+  // ★ 新增:按用户分页拿合约 (用于真实利润同步,免去扫日志)
+  `function getUserCreatedContracts(address user, uint256 offset, uint256 length) view returns (uint256 total, uint256[] ids, ${CONTRACT_INFO_TUPLE}[] items)`,
+  `function getUserTakenContracts(address user, uint256 offset, uint256 length) view returns (uint256 total, uint256[] ids, ${CONTRACT_INFO_TUPLE}[] items)`,
+  "function userLpBalances(address) view returns (uint256)",
+  "function getUserUsdtBalance(address) view returns (uint256)",  // LP × 2 折 USDT, /2 = 可用保证金
+  "function userActiveCreatedAmount(address) view returns (uint256)",
 ];
 const PAIR_ABI = [
   "function getReserves() view returns (uint112, uint112, uint32)",
@@ -680,19 +702,19 @@ async function scanAllContracts(nextId, maxCount) {
   const startId = nextId - 1n;
   const endId = startId - BigInt(toScan) + 1n;
 
-  dlog(`扫描 #${endId} 到 #${startId} (共 ${toScan} 个)`);
+  dlog(`扫描 #${endId} 到 #${startId} (共 ${toScan} 个) · 并发 20`);
   setProgress(0, true);
 
-  const batchSize = 50;
-  const results = [];
-  let successfulBatches = 0, totalFailures = 0, consecutiveFailures = 0;
+  const BATCH_SIZE = 100;     // 50 → 100
+  const PARALLEL   = 20;      // 串行 → 20 并发
+  const RETRY      = 2;       // 单批最多重试 2 次
 
-  for (let offset = 0; offset < toScan; offset += batchSize) {
-    if (cancelFlag) { dlog("⛔ 已取消"); break; }
-
-    const thisBatch = Math.min(batchSize, toScan - offset);
-    const calls = [];
+  // 切分所有 batch
+  const batches = [];
+  for (let offset = 0; offset < toScan; offset += BATCH_SIZE) {
+    const thisBatch = Math.min(BATCH_SIZE, toScan - offset);
     const idsInBatch = [];
+    const calls = [];
     for (let i = 0; i < thisBatch; i++) {
       const id = startId - BigInt(offset + i);
       if (id <= 0n) break;
@@ -703,81 +725,70 @@ async function scanAllContracts(nextId, maxCount) {
         callData: chaosIface.encodeFunctionData("getContract", [id]),
       });
     }
-    if (calls.length === 0) break;
-
-    const pct = Math.round((offset / toScan) * 100);
-    setProgress(pct);
-    setSync("bg-yellow-500 spin", `扫描中 ${offset}/${toScan} (${pct}%) · 已加载 ${results.length}`);
-
-    try {
-      const res = await multicall.aggregate3.staticCall(calls);
-      successfulBatches++;
-      consecutiveFailures = 0;  // 成功就重置连续失败计数
-      let okCount = 0;
-      for (let i = 0; i < res.length; i++) {
-        if (!res[i].success) continue;
-        try {
-          const d = chaosIface.decodeFunctionResult("getContract", res[i].returnData);
-          results.push({
-            id:          idsInBatch[i],
-            creator:     d[0],
-            taker:       d[1],
-            usdt:        d[2],
-            tokenAmount: d[4],
-            lockPrice:   d[6],
-            createTime:  Number(d[7]),
-            cooldownEnd: Number(d[8]),
-            isActive:    d[9],
-          });
-          okCount++;
-        } catch (e) {}
-      }
-      if (successfulBatches <= 3 || successfulBatches % 10 === 0) {
-        dlog(`  批次 ${successfulBatches}: +${okCount} 条 (累计 ${results.length})`);
-      }
-    } catch (e) {
-      totalFailures++;
-      consecutiveFailures++;
-      dlog(`⚠️ 批次失败 (连续 ${consecutiveFailures},累计 ${totalFailures}): ${e.message.slice(0, 100)}`);
-      // 连续 10 次失败才放弃(之前是累计 3 次,太激进)
-      if (consecutiveFailures >= 10) {
-        dlog(`❌ 连续 ${consecutiveFailures} 次失败,停止扫描。已加载 ${results.length} 条。建议换 RPC 后重试。`);
-        break;
-      }
-      // 指数退避
-      const backoff = Math.min(5000, 500 * Math.pow(2, consecutiveFailures));
-      await new Promise(r => setTimeout(r, backoff));
-      // 失败的批次再重试一次
-      try {
-        const res = await multicall.aggregate3.staticCall(calls);
-        consecutiveFailures = 0;
-        successfulBatches++;
-        for (let i = 0; i < res.length; i++) {
-          if (!res[i].success) continue;
-          try {
-            const d = chaosIface.decodeFunctionResult("getContract", res[i].returnData);
-            results.push({
-              id: idsInBatch[i], creator: d[0], taker: d[1], usdt: d[2],
-              tokenAmount: d[4], lockPrice: d[6], createTime: Number(d[7]),
-              cooldownEnd: Number(d[8]), isActive: d[9],
-            });
-          } catch {}
-        }
-        dlog(`  ↻ 重试成功,累计 ${results.length} 条`);
-      } catch (e2) {
-        dlog(`  ↻ 重试仍失败,跳过这批`);
-      }
-    }
+    if (calls.length > 0) batches.push({ idsInBatch, calls });
   }
+
+  const results = [];
+  let done = 0, failed = 0;
+
+  const decodeOne = (id, ret) => {
+    const d = chaosIface.decodeFunctionResult("getContract", ret);
+    return {
+      id,
+      creator:     d[0],
+      taker:       d[1],
+      usdt:        d[2],
+      lpAmount:    d[3],
+      tokenAmount: d[4],
+      benchmark:   d[5],
+      lockPrice:   d[6],
+      createTime:  Number(d[7]),
+      cooldownEnd: Number(d[8]),
+      isActive:    d[9],
+      isCompleted: d[10],
+      settledPnl:  d[11],        // ★ int256 (可负)
+    };
+  };
+
+  let idx = 0;
+  const worker = async () => {
+    while (idx < batches.length && !cancelFlag) {
+      const myIdx = idx++;
+      const { idsInBatch, calls } = batches[myIdx];
+      let ok = false;
+      for (let attempt = 0; attempt <= RETRY; attempt++) {
+        try {
+          const res = await multicall.aggregate3.staticCall(calls);
+          for (let i = 0; i < res.length; i++) {
+            if (!res[i].success) continue;
+            try { results.push(decodeOne(idsInBatch[i], res[i].returnData)); } catch {}
+          }
+          ok = true;
+          break;
+        } catch (e) {
+          if (attempt < RETRY) {
+            await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+          }
+        }
+      }
+      if (!ok) failed++;
+      done++;
+      const pct = Math.round(done / batches.length * 100);
+      setProgress(pct);
+      setSync("bg-yellow-500 spin", `扫描中 ${done}/${batches.length} 批 (${pct}%) · 已加载 ${results.length}`);
+    }
+  };
+
+  await Promise.all(Array(PARALLEL).fill(0).map(worker));
 
   setProgress(100, false);
-  const expected = toScan;
-  const loaded = results.length;
-  const pct = expected > 0 ? (loaded / expected * 100).toFixed(1) : 0;
-  dlog(`扫描完成: 获取 ${loaded}/${expected} 条 (${pct}%),失败 ${totalFailures} 批次`);
-  if (loaded < expected * 0.95) {
-    dlog(`⚠️ 数据不完整!建议换 RPC 后点"刷新"重试。Ankr/dRPC 通常最稳。`);
+  const pct = toScan > 0 ? (results.length / toScan * 100).toFixed(1) : 0;
+  dlog(`扫描完成: ${results.length}/${toScan} 条 (${pct}%) · 失败批次 ${failed}/${batches.length}`);
+  if (results.length < toScan * 0.95) {
+    dlog(`⚠️ 数据不完整!建议换 RPC 后重试。`);
   }
+  // 按 id 降序(并发可能乱序)
+  results.sort((a, b) => Number(b.id - a.id));
   return results;
 }
 
@@ -889,29 +900,49 @@ async function scanCreateLimits() {
   dlog(`━━━ 扫描 ${users.length} 个用户的额度 (Creator + Taker + 我的地址) ━━━`);
 
   state.createLimits = state.createLimits || {};
-  const batchSize = 100;
+  const batchSize = 100;   // 每批 100 个用户 = 200 个 multicall 调用
   let okCnt = 0, errCnt = 0;
 
   for (let off = 0; off < users.length; off += batchSize) {
     const batch = users.slice(off, off + batchSize);
-    const calls = batch.map(addr => ({
-      target: PROXY,
-      allowFailure: true,
-      callData: chaosIface.encodeFunctionData("getCreateLimit", [addr]),
-    }));
+    // 每个用户 2 个调用:getCreateLimit + getUserUsdtBalance
+    const calls = [];
+    for (const addr of batch) {
+      calls.push({
+        target: PROXY, allowFailure: true,
+        callData: chaosIface.encodeFunctionData("getCreateLimit", [addr]),
+      });
+      calls.push({
+        target: PROXY, allowFailure: true,
+        callData: chaosIface.encodeFunctionData("getUserUsdtBalance", [addr]),
+      });
+    }
 
     try {
       const res = await multicall.aggregate3.staticCall(calls);
-      for (let i = 0; i < res.length; i++) {
-        if (!res[i].success) { errCnt++; continue; }
-        try {
-          const d = chaosIface.decodeFunctionResult("getCreateLimit", res[i].returnData);
-          state.createLimits[batch[i]] = {
-            total: Number(ethers.formatUnits(d[0], 18)),
-            remainder: Number(ethers.formatUnits(d[1], 18)),
-          };
+      for (let i = 0; i < batch.length; i++) {
+        const r0 = res[i * 2], r1 = res[i * 2 + 1];
+        let total = 0, remainder = 0, margin = 0;
+        if (r0.success) {
+          try {
+            const d = chaosIface.decodeFunctionResult("getCreateLimit", r0.returnData);
+            total = Number(ethers.formatUnits(d[0], 18));
+            remainder = Number(ethers.formatUnits(d[1], 18));
+          } catch {}
+        }
+        if (r1.success) {
+          try {
+            const marginX2 = chaosIface.decodeFunctionResult("getUserUsdtBalance", r1.returnData)[0];
+            margin = Number(ethers.formatUnits(marginX2, 18)) / 2;  // 单边 USDT = 可用保证金
+          } catch {}
+        }
+        // 只要任一调用成功就记录
+        if (r0.success || r1.success) {
+          state.createLimits[batch[i]] = { total, remainder, margin };
           okCnt++;
-        } catch { errCnt++; }
+        } else {
+          errCnt++;
+        }
       }
     } catch (e) {
       errCnt += batch.length;
@@ -954,32 +985,35 @@ function renderLimitRank() {
     .split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
   const mySet = new Set(myAddrs);
 
-  // 把数据转成数组,过滤掉 total = 0 的(没意义)
+  // ★ 把所有数据都展开 (包括 total=0 但有 margin 的用户 — 比如只接单的 Taker)
   const rows = Object.entries(limits)
     .map(([addr, lim]) => ({
       addr,
-      total: lim.total,
-      remainder: lim.remainder,
-      used: lim.total - lim.remainder,
+      total: lim.total || 0,
+      remainder: lim.remainder || 0,
+      margin: lim.margin || 0,
+      used: (lim.total || 0) - (lim.remainder || 0),
       usedPct: lim.total > 0 ? (lim.total - lim.remainder) / lim.total * 100 : 0,
       mine: mySet.has(addr),
     }))
-    .filter(r => r.total > 0);
+    .filter(r => r.total > 0 || r.margin > 0);  // 有额度 或 有保证金 都显示
 
   cntEl.textContent = rows.length;
 
   // ===== 全市场统计 =====
-  let allTotal = 0, allUsed = 0, allRem = 0;
-  let myTotal = 0, myUsed = 0, myRem = 0;
+  let allTotal = 0, allUsed = 0, allRem = 0, allMargin = 0;
+  let myTotal = 0, myUsed = 0, myRem = 0, myMargin = 0;
   let myCount = 0;
   for (const r of rows) {
     allTotal += r.total;
     allUsed += r.used;
     allRem += r.remainder;
+    allMargin += r.margin;
     if (r.mine) {
       myTotal += r.total;
       myUsed += r.used;
       myRem += r.remainder;
+      myMargin += r.margin;
       myCount++;
     }
   }
@@ -1002,6 +1036,8 @@ function renderLimitRank() {
   setText('limitUsedPctAll', `占总额度 ${allUsedPct.toFixed(1)}%`);
   setText('limitRemAll', fmtBig(allRem));
   setText('limitRemPctAll', `占总额度 ${allRemPct.toFixed(1)}%`);
+  setText('limitMarginAll', fmtBig(allMargin));
+  setText('limitMarginSubtle', myMargin > 0 ? `我的 ${fmtBig(myMargin)} (${(myMargin/allMargin*100||0).toFixed(1)}%)` : 'LP 折单边 USDT');
 
   if (myCount > 0) {
     setText('limitMyShare', myShareTotal.toFixed(2) + '%');
@@ -1035,6 +1071,7 @@ function renderLimitRank() {
       case 'total_desc':     return b.total - a.total;
       case 'remainder_desc': return b.remainder - a.remainder;
       case 'used_desc':      return b.used - a.used;
+      case 'margin_desc':    return b.margin - a.margin;
       case 'usedpct_desc':   return b.usedPct - a.usedPct;
       case 'usedpct_asc':    return a.usedPct - b.usedPct;
       default:               return b.total - a.total;
@@ -1046,7 +1083,7 @@ function renderLimitRank() {
   const display = rows.slice(0, pageSize);
 
   if (display.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center p-6 text-slate-500">暂无数据 — 等额度扫描完成或点 ↻ 刷新</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center p-6 text-slate-500">暂无数据 — 等额度扫描完成或点 ↻ 刷新</td></tr>';
     return;
   }
 
@@ -1056,6 +1093,7 @@ function renderLimitRank() {
                    : 'bg-emerald-500';
     const rowCls = r.mine ? 'bg-purple-900/20 hover:bg-purple-900/40' : 'hover:bg-slate-800/30';
     const mineBadge = r.mine ? '<span class="ml-2 px-1 py-0.5 rounded bg-purple-600/40 text-purple-200 text-xs">我</span>' : '';
+    const marginCls = r.margin > 0 ? 'text-fuchsia-300' : 'text-slate-500';
     return `
       <tr class="border-t border-slate-700/40 ${rowCls}">
         <td class="px-3 py-1.5 text-slate-500">${i + 1}</td>
@@ -1065,6 +1103,7 @@ function renderLimitRank() {
         <td class="px-3 py-1.5 text-right mono text-slate-200">$${r.total.toFixed(0)}</td>
         <td class="px-3 py-1.5 text-right mono text-amber-300">$${r.used.toFixed(0)}</td>
         <td class="px-3 py-1.5 text-right mono text-emerald-300">$${r.remainder.toFixed(0)}</td>
+        <td class="px-3 py-1.5 text-right mono ${marginCls}">$${r.margin.toFixed(0)}</td>
         <td class="px-3 py-1.5">
           <div class="flex items-center gap-2">
             <div class="bg-slate-700 rounded-full h-2 w-24 overflow-hidden">
@@ -1302,16 +1341,19 @@ function renderMyPnl() {
   set('myHdrFee', '-' + fmtUsd(grandFee), 'mono text-red-400 text-lg font-bold');
   set('myHdrLocked', '$' + grandPrincipalActive.toFixed(2), 'mono text-cyan-300 text-lg font-bold');
 
-  // ★ 我的总额度 (来自 scanCreateLimits)
+  // ★ 我的总额度 + 总保证金 (来自 scanCreateLimits)
   const limitEl = document.getElementById('myHdrLimit');
+  const marginEl = document.getElementById('myHdrMargin');
   if (limitEl && state.createLimits) {
-    let totalRemainder = 0, totalLimit = 0, hasAny = false;
+    let totalRemainder = 0, totalLimit = 0, totalMargin = 0, hasAny = false, hasMargin = false;
     for (const a of myAddrs) {
       const lim = state.createLimits[a.toLowerCase()];
       if (lim) {
-        totalRemainder += lim.remainder;
-        totalLimit += lim.total;
+        totalRemainder += lim.remainder || 0;
+        totalLimit += lim.total || 0;
+        totalMargin += lim.margin || 0;
         hasAny = true;
+        if ((lim.margin || 0) > 0) hasMargin = true;
       }
     }
     if (hasAny) {
@@ -1324,6 +1366,21 @@ function renderMyPnl() {
     } else {
       limitEl.textContent = '--';
       limitEl.className = 'mono text-slate-500 text-lg font-bold';
+    }
+
+    if (marginEl) {
+      if (hasMargin) {
+        marginEl.textContent = '$' + totalMargin.toFixed(2);
+        marginEl.title = `${myAddrs.length} 个地址合计 · LP 单边 USDT (= getUserUsdtBalance/2) · 全部能拿来做 Taker`;
+        marginEl.className = 'mono text-lg font-bold text-fuchsia-300';
+      } else if (hasAny) {
+        marginEl.textContent = '$0.00';
+        marginEl.title = '所有地址都没有 LP 保证金';
+        marginEl.className = 'mono text-lg font-bold text-slate-500';
+      } else {
+        marginEl.textContent = '--';
+        marginEl.className = 'mono text-lg font-bold text-slate-500';
+      }
     }
   }
 
@@ -1520,6 +1577,13 @@ function saveSnapshots(arr) {
 // 一次扫描所有用户 (合约 1 个,而非按地址 14 个)
 // 数据源:链上真实 USDT Transfer,跟着钱走 100% 准确
 // ============================================================================
+// ============================================================================
+// ★ 同步真实利润 - V2:直接读合约,不扫日志
+// 对每个 my 地址,multicall getUserCreatedContracts + getUserTakenContracts
+// 按合约逻辑还原 USDT 进出:
+//   创建方:settled → out += usdtAmount,in += usdtAmount+min(pnl,2P)/2 (盈利时)
+//   接单方:创建方盈利 → in += bShare USDT
+// ============================================================================
 async function syncRealPnl() {
   const btn = document.getElementById('syncRealBtn');
   const progBox = document.getElementById('syncProgress');
@@ -1528,10 +1592,6 @@ async function syncRealPnl() {
   const eventCount = document.getElementById('syncEventCount');
 
   if (!provider) {
-    alert('请先点"刷新"加载合约数据');
-    return;
-  }
-  if (state.allContracts.length === 0) {
     alert('请先点"刷新"加载合约数据');
     return;
   }
@@ -1544,120 +1604,121 @@ async function syncRealPnl() {
   const t0 = Date.now();
 
   try {
-    dlog("━━━ 同步真实利润(扫合约 USDT 流水)━━━");
+    dlog("━━━ 同步真实利润(读合约 getUserCreatedContracts)━━━");
 
-    // 反推扫描起点:用最早合约的 createTime
-    const earliestCreate = state.allContracts.reduce(
-      (min, c) => c.createTime > 0 && c.createTime < min ? c.createTime : min,
-      Math.floor(Date.now() / 1000)
-    );
-    const latest = await provider.getBlockNumber();
-    const latestBlk = await provider.getBlock(latest);
-    const sampleBack = 50000;
-    const sampleBlk = await provider.getBlock(Math.max(1, latest - sampleBack));
-    const blockTime = (latestBlk.timestamp - sampleBlk.timestamp) / sampleBack;
-    dlog(`实测块时间: ${blockTime.toFixed(3)} 秒`);
-
-    const fromBlock = Math.max(0, latest - Math.ceil((latestBlk.timestamp - earliestCreate) / blockTime));
-    dlog(`扫块 ${fromBlock} → ${latest} (${((latest-fromBlock)*blockTime/86400).toFixed(2)} 天)`);
-
-    // 准备扫描
-    const padded = a => '0x' + '0'.repeat(24) + a.slice(2).toLowerCase();
-    const BATCH = 5000;
-    const tasks = [];
-    for (let s = fromBlock; s <= latest; s += BATCH) {
-      tasks.push([s, Math.min(s + BATCH - 1, latest)]);
-    }
-    dlog(`共 ${tasks.length} 批,每批 ${BATCH} 块,并发 8`);
-
-    const allIns = [], allOuts = [];
-    let done = 0, errCnt = 0;
-
-    // 并发跑
-    const PARALLEL = 20;  // 加大并发提速
-    let idx = 0;
-    async function worker() {
-      while (idx < tasks.length) {
-        const myIdx = idx++;
-        const [s, e] = tasks[myIdx];
-        try {
-          const [ins, outs] = await Promise.all([
-            provider.getLogs({
-              address: USDT, fromBlock: s, toBlock: e,
-              topics: [TRANSFER_SIG, null, padded(PROXY)]
-            }),
-            provider.getLogs({
-              address: USDT, fromBlock: s, toBlock: e,
-              topics: [TRANSFER_SIG, padded(PROXY), null]
-            }),
-          ]);
-          allIns.push(...ins);
-          allOuts.push(...outs);
-        } catch (err) {
-          // 重试一次,块范围减半
-          if (e - s > 100) {
-            const m = Math.floor((s + e) / 2);
-            try {
-              const [ins1, outs1] = await Promise.all([
-                provider.getLogs({ address: USDT, fromBlock: s, toBlock: m,
-                  topics: [TRANSFER_SIG, null, padded(PROXY)] }),
-                provider.getLogs({ address: USDT, fromBlock: s, toBlock: m,
-                  topics: [TRANSFER_SIG, padded(PROXY), null] }),
-              ]);
-              const [ins2, outs2] = await Promise.all([
-                provider.getLogs({ address: USDT, fromBlock: m+1, toBlock: e,
-                  topics: [TRANSFER_SIG, null, padded(PROXY)] }),
-                provider.getLogs({ address: USDT, fromBlock: m+1, toBlock: e,
-                  topics: [TRANSFER_SIG, padded(PROXY), null] }),
-              ]);
-              allIns.push(...ins1, ...ins2);
-              allOuts.push(...outs1, ...outs2);
-            } catch (e2) { errCnt++; }
-          } else {
-            errCnt++;
-          }
-        }
-        done++;
-        const pct = Math.round(done / tasks.length * 100);
-        progBar.style.width = pct + '%';
-        progText.textContent = `${done}/${tasks.length} (${pct}%)`;
-        eventCount.textContent = `· ${allIns.length + allOuts.length} 事件`;
-      }
-    }
-    await Promise.all(Array(PARALLEL).fill(0).map(() => worker()));
-
-    dlog(`扫到 ${allIns.length} IN + ${allOuts.length} OUT (失败 ${errCnt} 批)`);
-
-    // 按用户聚合(用 BigInt 算精度高,最后转 Number)
-    const realPnl = {};  // 小写地址 → { in, out, txInCnt, txOutCnt }
-    const ensure = (a) => { if (!realPnl[a]) realPnl[a] = { in: 0n, out: 0n, txInCnt: 0, txOutCnt: 0 }; };
-
-    for (const log of allIns) {
-      const user = '0x' + log.topics[1].slice(26).toLowerCase();
-      ensure(user);
-      realPnl[user].out += BigInt(log.data);  // 用户付给合约 = 用户 OUT
-      realPnl[user].txOutCnt++;
-    }
-    for (const log of allOuts) {
-      const user = '0x' + log.topics[2].slice(26).toLowerCase();
-      ensure(user);
-      realPnl[user].in += BigInt(log.data);   // 合约转给用户 = 用户 IN
-      realPnl[user].txInCnt++;
+    // 拿我的地址列表
+    const myAddrs = (document.getElementById('myAddrs').value || '')
+      .split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+    if (myAddrs.length === 0) {
+      dlog("⚠️ 没有配置地址");
+      progText.textContent = '⚠️ 没有地址';
+      return;
     }
 
-    // 转 Number 储存
+    // checksum + 去重
+    const validAddrs = [];
+    for (const a of myAddrs) {
+      try { validAddrs.push(ethers.getAddress(a)); } catch {}
+    }
+    const uniq = [...new Set(validAddrs)];
+    dlog(`查询 ${uniq.length} 个地址 (${myAddrs.length - uniq.length} 重复/无效已剔除)`);
+
+    // 构造 multicall: 每地址 2 个调用 (created + taken)
+    // 取 0-1000 单 (够大,绝大多数账户不到)
+    const calls = [];
+    for (const a of uniq) {
+      calls.push({
+        target: PROXY, allowFailure: true,
+        callData: chaosIface.encodeFunctionData("getUserCreatedContracts", [a, 0, 1000]),
+      });
+      calls.push({
+        target: PROXY, allowFailure: true,
+        callData: chaosIface.encodeFunctionData("getUserTakenContracts", [a, 0, 1000]),
+      });
+    }
+
+    progText.textContent = `查 ${uniq.length} 个地址 (${calls.length} 调用)`;
+
+    // 单次 multicall 搞定 (28 个调用对 RPC 来说是小事)
+    const t1 = Date.now();
+    const res = await multicall.aggregate3.staticCall(calls);
+    dlog(`multicall 完成,耗时 ${Date.now() - t1}ms`);
+
+    // 解析结果 → 还原 USDT 进出
     state.realPnlByUser = {};
-    for (const [user, d] of Object.entries(realPnl)) {
-      state.realPnlByUser[user] = {
-        in:  Number(ethers.formatUnits(d.in, 18)),
-        out: Number(ethers.formatUnits(d.out, 18)),
-        txInCnt: d.txInCnt,
-        txOutCnt: d.txOutCnt,
-        net: Number(ethers.formatUnits(d.in - d.out, 18)),
+    let totalSettled = 0, totalActive = 0, totalContracts = 0;
+
+    for (let i = 0; i < uniq.length; i++) {
+      const addr = uniq[i];
+      const lower = addr.toLowerCase();
+      const createdRes = res[i * 2];
+      const takenRes   = res[i * 2 + 1];
+
+      let inSum = 0n, outSum = 0n;
+      let inCnt = 0, outCnt = 0;
+
+      // --- Created contracts (我是创建方) ---
+      if (createdRes.success) {
+        try {
+          const decoded = chaosIface.decodeFunctionResult("getUserCreatedContracts", createdRes.returnData);
+          const items = decoded[2]; // [total, ids, items]
+          totalContracts += items.length;
+          for (const it of items) {
+            if (it.isActive) { totalActive++; continue; }
+            totalSettled++;
+            // 创建方所有已结算单都 OUT 过本金
+            outSum += it.usdtAmount; outCnt++;
+
+            const taker = it.taker.toLowerCase();
+            if (taker === ZERO) {
+              // 无人接单,撤销 → 全额回款
+              inSum += it.usdtAmount; inCnt++;
+            } else if (it.settledPnl > 0n) {
+              // 盈利:回款 = 本金 + min(profit, 2*P)/2
+              const cap = it.usdtAmount * 2n;
+              const cappedProfit = it.settledPnl > cap ? cap : it.settledPnl;
+              inSum += it.usdtAmount + cappedProfit / 2n;
+              inCnt++;
+            } else {
+              // 亏损 / 保本 → 回本金
+              inSum += it.usdtAmount; inCnt++;
+            }
+          }
+        } catch (e) { dlog(`⚠️ ${addr} created 解析失败: ${e.message}`); }
+      }
+
+      // --- Taken contracts (我是接单方) ---
+      if (takenRes.success) {
+        try {
+          const decoded = chaosIface.decodeFunctionResult("getUserTakenContracts", takenRes.returnData);
+          const items = decoded[2];
+          for (const it of items) {
+            if (it.isActive) continue;
+            // 只有创建方盈利时,taker 才收到 USDT (bShare)
+            if (it.settledPnl > 0n) {
+              const cap = it.usdtAmount * 2n;
+              const cappedProfit = it.settledPnl > cap ? cap : it.settledPnl;
+              const bShare = cappedProfit - cappedProfit / 2n;
+              if (bShare > 0n) { inSum += bShare; inCnt++; }
+            }
+            // 创建方亏损时 taker 只拿 LP,不影响 USDT 余额 → 不计
+          }
+        } catch (e) { dlog(`⚠️ ${addr} taken 解析失败: ${e.message}`); }
+      }
+
+      state.realPnlByUser[lower] = {
+        in:  Number(ethers.formatUnits(inSum, 18)),
+        out: Number(ethers.formatUnits(outSum, 18)),
+        txInCnt: inCnt,
+        txOutCnt: outCnt,
+        net: Number(ethers.formatUnits(inSum - outSum, 18)),
       };
     }
+    const latest = await provider.getBlockNumber();
     state.realPnlSyncedAt = Date.now();
     state.realPnlSyncedBlock = latest;
+    dlog(`✓ 解析完成: ${uniq.length} 地址,${totalContracts} 个创建合约 (已结算 ${totalSettled} / 运行中 ${totalActive})`);
+    progBar.style.width = '100%';
 
     // 存到 localStorage(缓存所有用户数据,体积约 1-3MB,localStorage 限制 5-10MB 够用)
     try {
@@ -1687,32 +1748,11 @@ async function syncRealPnl() {
       dlog(`⚠️ 缓存失败: ${e.message}`);
     }
 
-    const dt = ((Date.now() - t0) / 1000).toFixed(1);
+    const dt = ((Date.now() - t0) / 1000).toFixed(2);
     const totalUsers = Object.keys(state.realPnlByUser).length;
-    dlog(`✓ 同步完成: ${totalUsers} 个地址,耗时 ${dt}s`);
+    dlog(`✓ 同步完成: ${totalUsers} 个地址,耗时 ${dt}s (旧版扫日志通常 30~120s)`);
 
-    // 诊断:看看用户的地址有没有匹配
-    const myAddrsList = (document.getElementById('myAddrs').value || '')
-      .split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
-    let myMatched = 0, myNotFound = [];
-    for (const a of myAddrsList) {
-      if (state.realPnlByUser[a]) myMatched++;
-      else myNotFound.push(a);
-    }
-    dlog(`你的 ${myAddrsList.length} 个地址中有 ${myMatched} 个找到流水`);
-    if (myMatched === 0 && myAddrsList.length > 0) {
-      dlog(`⚠️ 一个都没匹配上!可能原因:`);
-      dlog(`  · 你的地址跟太初合约没有过 USDT 互动`);
-      dlog(`  · 扫描时间范围不够(扫了 ${tasks.length * 5000} 块 ≈ ${(tasks.length * 5000 * blockTime / 86400).toFixed(1)} 天)`);
-      dlog(`  · 地址写错了`);
-      dlog(`  示例:扫到的前 3 个地址: ${Object.keys(state.realPnlByUser).slice(0,3).join(', ')}`);
-      dlog(`  你的地址: ${myAddrsList.slice(0,3).join(', ')}`);
-    } else if (myMatched > 0) {
-      dlog(`✓ 找到的地址包括: ${Object.keys(state.realPnlByUser).filter(a => myAddrsList.includes(a)).slice(0,3).join(', ')}`);
-    }
-
-    progText.textContent = `✓ ${dt}s · 命中 ${myMatched}/${myAddrsList.length}`;
-    progBar.style.width = '100%';
+    progText.textContent = `✓ ${dt}s · ${uniq.length} 地址`;
 
     renderMyPnl();
     setTimeout(() => {
@@ -2240,7 +2280,7 @@ function render() {
 // ============================================================================
 // 事件
 // ============================================================================
-const DEFAULT_RPC = "https://rpc.ankr.com/bsc";
+const DEFAULT_RPC = "https://bsc.drpc.org";  // 公共 dRPC,无需 key
 document.getElementById('rpcInput').value = localStorage.getItem("bsc_rpc") || DEFAULT_RPC;
 
 document.getElementById('saveRpcBtn').addEventListener('click', () => {
@@ -2273,20 +2313,16 @@ loadRealPnlCache();
 renderSnapshots();
 renderLimitRank();
 
-// 公开版: 不预填地址
-const MY_ADDRESSES = "";
-
+// 不硬编码默认地址 — 用户自己输入,localStorage 自动持久化
 document.getElementById('resetAddrsBtn').addEventListener('click', () => {
-  if (confirm("确定清空所有地址?")) {
-    document.getElementById('myAddrs').value = "";
-    localStorage.removeItem("my_addrs");
-    updateMyAddrCount();
-    renderMyPnl();
-    render();
-  }
+  document.getElementById('myAddrs').value = '';
+  localStorage.removeItem("my_addrs");
+  updateMyAddrCount();
+  renderMyPnl();
+  render();
 });
 
-document.getElementById('myAddrs').value = localStorage.getItem("my_addrs") || "";
+document.getElementById('myAddrs').value = localStorage.getItem("my_addrs") || '';
 
 function updateMyAddrCount() {
   const text = document.getElementById('myAddrs').value;
